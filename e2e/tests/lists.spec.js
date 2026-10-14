@@ -1,26 +1,13 @@
 // Anonymous, offline-capable use: everything lives in IndexedDB.
 const { test, expect } = require('@playwright/test');
 
-const items = (page) => page.locator('ul.items li input.text');
-
-async function expectItems(page, expected) {
-  await expect
-    .poll(() => items(page).evaluateAll((els) => els.map((el) => el.value)))
-    .toEqual(expected);
-}
+const { items, expectItems, createList: create, addItem } = require('./helpers');
 
 async function createList(page, title, { navigate = true } = {}) {
-  if (navigate) await page.goto('/');
+  if (navigate) return create(page, title);
   await page.getByLabel('New list title').fill(title);
   await page.getByRole('button', { name: 'Create' }).click();
-  await expect(page).toHaveURL(/\/lists\/[0-9a-f-]{36}$/);
   await expect(page.getByLabel('List title')).toHaveValue(title);
-}
-
-async function addItem(page, text) {
-  await page.getByLabel('New item').fill(text);
-  await page.getByLabel('New item').press('Enter');
-  await expect(items(page).last()).toHaveValue(text);
 }
 
 test('creates a list and keeps it across reloads', async ({ page }) => {
