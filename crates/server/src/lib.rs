@@ -2,6 +2,7 @@
 
 pub mod accounts;
 pub mod admin;
+pub mod auth;
 pub mod connection;
 pub mod docs;
 pub mod store;
