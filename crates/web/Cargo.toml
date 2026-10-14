@@ -8,6 +8,7 @@ license.workspace = true
 supp-shared = { path = "../shared" }
 console_error_panic_hook = "0.1"
 leptos = { version = "0.8", features = ["csr"] }
+leptos_router = "0.8"
 idb = "0.6"
 automerge.workspace = true
 autosurgeon.workspace = true
@@ -15,3 +16,4 @@ js-sys = "0.3"
 thiserror.workspace = true
 uuid.workspace = true
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
