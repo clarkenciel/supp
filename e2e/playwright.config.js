@@ -2,6 +2,9 @@
 // built client, as in production.
 const { defineConfig, devices } = require('@playwright/test');
 
+// Lets tests route (and so cut off) the service worker's own requests.
+process.env.PW_EXPERIMENTAL_SERVICE_WORKER_NETWORK_EVENTS = '1';
+
 module.exports = defineConfig({
   testDir: './tests',
   timeout: 30_000,

@@ -1,7 +1,9 @@
 // Anonymous, offline-capable use: everything lives in IndexedDB.
 const { test, expect } = require('@playwright/test');
 
-const { items, expectItems, createList: create, addItem } = require('./helpers');
+const {
+  items, expectItems, createList: create, addItem, goOffline,
+} = require('./helpers');
 
 async function createList(page, title, { navigate = true } = {}) {
   if (navigate) return create(page, title);
@@ -53,11 +55,10 @@ test('reorders, edits and removes items', async ({ page }) => {
   await expectItems(page, ['apples']);
 });
 
-test('works with the network off', async ({ page, context }) => {
-  // Loading the app offline needs the service worker (milestone 4); here the
-  // app is loaded first, then the network goes away.
+test('keeps working when the network goes away', async ({ page, context }) => {
+  // Starting with no network is covered in offline.spec.js.
   await page.goto('/');
-  await context.setOffline(true);
+  await goOffline(context);
   await createList(page, 'Trip', { navigate: false });
   await addItem(page, 'tent');
   await expectItems(page, ['tent']);
