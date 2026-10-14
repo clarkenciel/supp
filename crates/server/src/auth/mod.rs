@@ -1,11 +1,13 @@
 //! Authentication: identity providers, login routes and sessions.
 
+pub mod google;
 pub mod provider;
 pub mod routes;
 pub mod session;
 
 use std::sync::Arc;
 
+pub use google::GoogleProvider;
 pub use provider::{DevProvider, IdentityProvider};
 pub use session::AuthUser;
 
