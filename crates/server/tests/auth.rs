@@ -243,3 +243,39 @@ async fn disabled_users_lose_their_session() {
     let response = browser.sign_in(&app, "/auth/login", "erin").await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn serves_the_web_client_with_spa_fallback() {
+    let dir = tempfile::tempdir().unwrap();
+    let dist = dir.path().join("dist");
+    std::fs::create_dir(&dist).unwrap();
+    std::fs::write(dist.join("index.html"), "<html>app</html>").unwrap();
+    std::fs::write(dist.join("app.js"), "console.log(1)").unwrap();
+
+    let store = Store::open(&dir.path().join("supp.db")).await.unwrap();
+    let docs = Arc::new(Docs::new(store.clone(), 100));
+    let auth = AuthConfig::new(Arc::new(DevProvider), "http://supp.test");
+    let mut state = AppState::new(&store, docs, auth).await.unwrap();
+    state.static_dir = Some(dist);
+    let app = TestApp {
+        _dir: dir,
+        router: supp_server::app(state),
+        accounts: store.accounts(),
+    };
+
+    let mut browser = Browser::default();
+    let body = |r: Response<Body>| async { r.into_body().collect().await.unwrap().to_bytes() };
+    assert_eq!(body(browser.get(&app, "/").await).await, "<html>app</html>");
+    assert_eq!(
+        body(browser.get(&app, "/app.js").await).await,
+        "console.log(1)"
+    );
+    let deep = browser.get(&app, &format!("/lists/{}", DocId::new())).await;
+    assert_eq!(deep.status(), StatusCode::OK);
+    assert_eq!(body(deep).await, "<html>app</html>");
+    // API routes still win over the fallback.
+    assert_eq!(
+        browser.get(&app, "/api/me").await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+}

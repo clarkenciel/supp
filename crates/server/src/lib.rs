@@ -7,7 +7,7 @@ pub mod connection;
 pub mod docs;
 pub mod store;
 
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use axum::{
     Router,
@@ -15,6 +15,7 @@ use axum::{
     routing::{get, post},
 };
 use axum_extra::extract::cookie::Key;
+use tower_http::services::{ServeDir, ServeFile};
 
 pub use docs::Docs;
 pub use store::Store;
@@ -26,6 +27,8 @@ pub struct AppState {
     pub docs: Arc<Docs>,
     pub accounts: Accounts,
     pub auth: Arc<AuthConfig>,
+    /// The built web client, if this server serves it.
+    pub static_dir: Option<PathBuf>,
     cookie_key: Key,
 }
 
@@ -35,6 +38,7 @@ impl AppState {
             docs,
             accounts: store.accounts(),
             auth: Arc::new(auth),
+            static_dir: None,
             cookie_key: Key::from(&store.server_key("cookie").await?),
         })
     }
@@ -56,6 +60,12 @@ pub fn app(state: AppState) -> Router {
         .route("/api/me", get(auth::routes::me));
     if state.auth.provider.is_dev() {
         router = router.route("/auth/dev", get(auth::routes::dev_sign_in));
+    }
+    if let Some(dir) = &state.static_dir {
+        // Unknown paths get index.html so client-side routes (/lists/…)
+        // survive a reload or a shared link.
+        let assets = ServeDir::new(dir).fallback(ServeFile::new(dir.join("index.html")));
+        router = router.fallback_service(assets);
     }
     router.with_state(state)
 }
