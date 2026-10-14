@@ -2,7 +2,7 @@
 // over the same IndexedDB. Pages in one browser context are tabs.
 const { test, expect } = require('@playwright/test');
 const {
-  items, expectItems, createList, addItem, goOffline,
+  invite, uniqueName, signIn, items, expectItems, createList, addItem, goOffline,
 } = require('./helpers');
 
 const lists = (page) => page.locator('ul.lists li');
@@ -89,6 +89,37 @@ test('lists created or deleted in one tab come and go in the other', async ({ co
   await a.getByRole('button', { name: 'Delete list' }).click();
   await expect(lists(a)).toHaveCount(0);
   await expect(lists(b)).toHaveCount(0);
+});
+
+test('tabs follow signing in and out in another tab', async ({ context }) => {
+  const a = await context.newPage();
+  await createList(a, 'Team');
+  const b = await context.newPage();
+  await b.goto(a.url());
+  await expect(b.getByLabel('List title')).toHaveValue('Team');
+
+  // Signing up in one tab adopts the lists; the other tab notices and
+  // syncs too.
+  await signIn(a, invite(), uniqueName('tabs'));
+  await expect(lists(a)).toHaveText([/Team/]);
+  await expect(b.locator('.sync-status')).toHaveText('Synced');
+  await addItem(b, 'plan');
+  await lists(a).getByRole('link').click();
+  await expectItems(a, ['plan']);
+
+  // Offline, the tabs still keep each other up to date.
+  await goOffline(context);
+  await addItem(a, 'agenda');
+  await expectItems(b, ['plan', 'agenda']);
+  await goOnline(context);
+
+  // Signing out erases this device's lists; the other tab doesn't keep
+  // showing them.
+  await a.goto('/');
+  await a.getByRole('button', { name: 'Sign out' }).click();
+  await expect(a.getByText('Lists are stored on this device only.')).toBeVisible();
+  await expect(b.getByText('Lists are stored on this device only.')).toBeVisible();
+  await expect(b.getByText("This list doesn't exist on this device.")).toBeVisible();
 });
 
 test('tabs editing one list keep all their changes through compaction', async ({ context }) => {
