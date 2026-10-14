@@ -21,8 +21,15 @@ use wasm_bindgen::JsValue;
 
 use crate::storage::{Storage, StorageError};
 
-/// Called with the ID of every locally edited or created list.
-pub type ChangeListener = Rc<dyn Fn(DocId)>;
+#[derive(Clone, Copy, Debug)]
+pub enum LocalEvent {
+    /// A list was created or edited on this device.
+    Changed(DocId),
+    /// A list was deleted on this device.
+    Deleted(DocId),
+}
+
+pub type ChangeListener = Rc<dyn Fn(LocalEvent)>;
 
 /// Change chunks a document may accumulate before it is compacted.
 const COMPACT_AFTER: usize = 50;
@@ -105,7 +112,7 @@ impl Repo {
             .borrow_mut()
             .insert(id, OpenDoc::new(id, doc, Vec::new(), Vec::new()));
         self.lists.update(|l| l.push(id));
-        self.notify(id);
+        self.notify(LocalEvent::Changed(id));
 
         spawn_local(async move {
             if let Err(err) = inner.storage.create_doc(id, js_sys::Date::now()).await {
@@ -145,11 +152,19 @@ impl Repo {
         *self.inner.get_value().on_change.borrow_mut() = listener;
     }
 
-    fn notify(&self, id: DocId) {
+    fn notify(&self, event: LocalEvent) {
         let listener = self.inner.get_value().on_change.borrow().clone();
         if let Some(listener) = listener {
-            listener(id);
+            listener(event);
         }
+    }
+
+    pub async fn left_docs(&self) -> Result<Vec<DocId>, StorageError> {
+        self.inner.get_value().storage.left_docs().await
+    }
+
+    pub async fn forget_left(&self, id: DocId) -> Result<(), StorageError> {
+        self.inner.get_value().storage.forget_left(id).await
     }
 
     pub fn generate_sync(&self, id: DocId, state: &mut sync::State) -> Option<sync::Message> {
@@ -202,7 +217,7 @@ impl Repo {
             }
             open.view.set(hydrate_or_default(&open.doc, id));
         }
-        self.notify(id);
+        self.notify(LocalEvent::Changed(id));
         spawn_local(persist(inner, id));
     }
 
@@ -229,6 +244,7 @@ impl Repo {
         let inner = self.inner.get_value();
         inner.docs.borrow_mut().remove(&id);
         self.lists.update(|l| l.retain(|&d| d != id));
+        self.notify(LocalEvent::Deleted(id));
         spawn_local(async move {
             if let Err(err) = inner.storage.delete_doc(id).await {
                 logging::error!("deleting {id}: {err}");

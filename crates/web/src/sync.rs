@@ -16,12 +16,12 @@ use prost::Message as _;
 use supp_shared::{
     DocId, PROTOCOL_VERSION,
     proto::sync::v1::{
-        ClientMessage, Hello, Subscribe, SyncPayload, client_message, server_message,
+        ClientMessage, Hello, Leave, Subscribe, SyncPayload, client_message, server_message,
     },
 };
 
 use crate::{
-    repo::Repo,
+    repo::{LocalEvent, Repo},
     session::{Session, fetch_me},
 };
 
@@ -143,9 +143,9 @@ async fn connect(repo: Repo, status: RwSignal<SyncStatus>) -> Outcome {
         return closed;
     }
 
-    let (changed_tx, mut changed) = mpsc::unbounded::<DocId>();
-    repo.set_change_listener(Some(Rc::new(move |id| {
-        let _ = changed_tx.unbounded_send(id);
+    let (changed_tx, mut changed) = mpsc::unbounded::<LocalEvent>();
+    repo.set_change_listener(Some(Rc::new(move |event| {
+        let _ = changed_tx.unbounded_send(event);
     })));
     let _guard = ListenerGuard(repo);
 
@@ -166,8 +166,8 @@ async fn connect(repo: Repo, status: RwSignal<SyncStatus>) -> Outcome {
                 Some(Ok(Message::Text(_))) => Ok(()),
                 Some(Err(_)) | None => Err(()),
             },
-            id = changed.next() => match id {
-                Some(id) if conn.welcomed => conn.local_change(id).await,
+            event = changed.next() => match event {
+                Some(event) if conn.welcomed => conn.local_event(event).await,
                 _ => Ok(()),
             },
         };
@@ -205,15 +205,24 @@ impl Connection {
             Some(Msg::Welcome(welcome)) => {
                 self.welcomed = true;
                 status.set(SyncStatus::Online);
+                let left = self.repo.left_docs().await.unwrap_or_else(|err| {
+                    logging::error!("reading pending leaves: {err}");
+                    Vec::new()
+                });
                 for id in welcome
                     .doc_ids
                     .iter()
                     .filter_map(|b| DocId::from_bytes(b).ok())
                 {
-                    self.repo.ensure(id);
+                    if !left.contains(&id) {
+                        self.repo.ensure(id);
+                    }
                 }
                 for id in self.repo.ids() {
                     self.subscribe(id).await?;
+                }
+                for id in left {
+                    self.leave(id).await?;
                 }
             }
             Some(Msg::Sync(payload)) => {
@@ -240,6 +249,16 @@ impl Connection {
                     self.states.remove(&id);
                 }
             }
+            Some(Msg::Left(left)) => {
+                if let Ok(id) = DocId::from_bytes(&left.doc_id) {
+                    let repo = self.repo;
+                    spawn_local(async move {
+                        if let Err(err) = repo.forget_left(id).await {
+                            logging::error!("forgetting leave of {id}: {err}");
+                        }
+                    });
+                }
+            }
             Some(Msg::SessionEnded(_)) => return Ok(Some(Outcome::SessionEnded)),
             Some(Msg::Upgrade(_)) => return Ok(Some(Outcome::UpgradeRequired)),
             Some(Msg::Error(error)) => logging::warn!("server: {}", error.message),
@@ -249,13 +268,21 @@ impl Connection {
         Ok(None)
     }
 
-    async fn local_change(&mut self, id: DocId) -> SendResult {
-        if self.states.contains_key(&id) {
-            self.push(id).await
-        } else {
+    async fn local_event(&mut self, event: LocalEvent) -> SendResult {
+        match event {
+            LocalEvent::Changed(id) if self.states.contains_key(&id) => self.push(id).await,
             // A list created while connected.
-            self.subscribe(id).await
+            LocalEvent::Changed(id) => self.subscribe(id).await,
+            LocalEvent::Deleted(id) => self.leave(id).await,
         }
+    }
+
+    async fn leave(&mut self, id: DocId) -> SendResult {
+        self.states.remove(&id);
+        let leave = client_message::Msg::Leave(Leave {
+            doc_id: id.as_bytes().to_vec(),
+        });
+        send(&mut self.sink, leave).await
     }
 
     async fn subscribe(&mut self, id: DocId) -> SendResult {
