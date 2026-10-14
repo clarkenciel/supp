@@ -3,6 +3,7 @@ mod overview;
 mod repo;
 mod session;
 mod storage;
+mod sync;
 
 use leptos::prelude::*;
 use leptos_router::{
@@ -15,6 +16,7 @@ use crate::{
     overview::Overview,
     repo::Repo,
     session::{AccountBar, Session},
+    sync::SyncStatus,
 };
 
 fn main() {
@@ -46,9 +48,12 @@ fn main() {
 #[component]
 fn App(repo: Repo, session: Session) -> impl IntoView {
     let session = RwSignal::new(session);
+    let status = RwSignal::new(SyncStatus::Idle);
     provide_context(repo);
     provide_context(session);
+    provide_context(status);
     leptos::task::spawn_local(session::resolve(repo, session));
+    sync::run_while_signed_in(repo, session, status);
     view! {
         <main>
             <AccountBar />

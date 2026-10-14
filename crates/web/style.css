@@ -154,3 +154,6 @@ button.link {
   padding: 0;
   text-decoration: underline;
 }
+
+.sync-status { color: var(--muted); }
+.sync-status[data-status="Offline"] { color: var(--danger); }
