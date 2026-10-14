@@ -1,5 +1,6 @@
 mod list_page;
 mod overview;
+mod pwa;
 mod repo;
 mod session;
 mod storage;
@@ -21,6 +22,9 @@ use crate::{
 
 fn main() {
     console_error_panic_hook::set_once();
+    wasm_bindgen_futures::spawn_local(async {
+        pwa::register().await;
+    });
     // Leptos's executor is set up by mounting, which waits for storage, so
     // the bootstrap future runs on wasm-bindgen's directly.
     wasm_bindgen_futures::spawn_local(async {
