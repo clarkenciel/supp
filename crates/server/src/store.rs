@@ -41,6 +41,10 @@ impl Store {
         Ok(Self { pool })
     }
 
+    pub fn accounts(&self) -> crate::accounts::Accounts {
+        crate::accounts::Accounts::new(self.pool.clone())
+    }
+
     pub async fn close(&self) {
         self.pool.close().await;
     }

@@ -1,5 +1,6 @@
 //! supp server: Automerge sync over WebSocket, persisted to SQLite.
 
+pub mod accounts;
 pub mod connection;
 pub mod docs;
 pub mod store;
