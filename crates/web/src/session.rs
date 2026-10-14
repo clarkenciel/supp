@@ -217,12 +217,20 @@ pub fn AccountBar() -> impl IntoView {
                 .into_any(),
             }}
             // Offered when a new version has installed, or when the server
-            // refuses this one.
+            // refuses this one, or another tab runs one that needed this
+            // tab to let go of the database.
             {move || {
-                (new_version.get() || status.get() == SyncStatus::UpgradeRequired)
+                (new_version.get() || status.get() == SyncStatus::UpgradeRequired
+                    || repo.storage_closed().get())
                     .then(|| {
+                        let text = if repo.storage_closed().get() {
+                            "A new version of the app is open in another tab. \
+                             Reload to keep saving changes here."
+                        } else {
+                            "A new version of the app is available."
+                        };
                         view! {
-                            <span class="banner">"A new version of the app is available."</span>
+                            <span class="banner">{text}</span>
                             <button
                                 disabled=updating
                                 on:click=move |_| {

@@ -122,6 +122,33 @@ test('tabs follow signing in and out in another tab', async ({ context }) => {
   await expect(b.getByText("This list doesn't exist on this device.")).toBeVisible();
 });
 
+test('a newer build upgrading the database gets the tab to reload', async ({ context }) => {
+  const a = await context.newPage();
+  await createList(a, 'Old');
+  const b = await context.newPage();
+  await b.goto('/');
+  await expect(lists(b)).toHaveText([/Old/]);
+
+  // Stand in for a newer build opening the database at a higher version.
+  // It would wait for good if any tab held on to its connection.
+  const version = await b.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open('supp', 1000);
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          open.result.close();
+          resolve(open.result.version);
+        };
+      }),
+  );
+  expect(version).toBe(1000);
+  for (const page of [a, b]) {
+    await expect(page.getByText('A new version of the app is open in another tab.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Reload' })).toBeVisible();
+  }
+});
+
 test('tabs editing one list keep all their changes through compaction', async ({ context }) => {
   test.setTimeout(120_000);
   const a = await context.newPage();

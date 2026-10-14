@@ -56,6 +56,8 @@ const COMPACT_AFTER: usize = 50;
 pub struct Repo {
     inner: StoredValue<Rc<Inner>, LocalStorage>,
     lists: RwSignal<Vec<DocId>>,
+    /// Set when another tab upgraded the database and this one let go of it.
+    storage_closed: RwSignal<bool>,
 }
 
 struct Inner {
@@ -86,7 +88,8 @@ impl Repo {
     /// Opens storage and loads every local list. Lists are small and few, so
     /// loading them all up front keeps the overview simple.
     pub async fn open() -> Result<Self, StorageError> {
-        let storage = Storage::open().await?;
+        let storage_closed = RwSignal::new(false);
+        let storage = Storage::open(move || storage_closed.set(true)).await?;
         // Listening before reading means nothing written meanwhile is missed;
         // anything already read is skipped when its message comes.
         let (to_repo, from_tabs) = mpsc::unbounded();
@@ -113,7 +116,14 @@ impl Repo {
                 from_tabs: RefCell::new(Some(from_tabs)),
             })),
             lists: RwSignal::new(ids),
+            storage_closed,
         })
+    }
+
+    /// Whether this tab has had to close its database for another tab
+    /// running a newer build: nothing is saved here until it reloads.
+    pub fn storage_closed(&self) -> Signal<bool> {
+        self.storage_closed.into()
     }
 
     /// Local lists, oldest first.

@@ -114,7 +114,10 @@ impl Stored {
 }
 
 impl Storage {
-    pub async fn open() -> Result<Self> {
+    /// Opens the database. If another tab later needs to upgrade it (a newer
+    /// build of the app), this connection closes so as not to block that,
+    /// and `on_closed` is called: from then on every operation fails.
+    pub async fn open(on_closed: impl FnOnce() + 'static) -> Result<Self> {
         let mut request = Factory::new()?.open(DB_NAME, Some(DB_VERSION))?;
         request.on_upgrade_needed(|event| {
             let db = event.database().expect("upgrade event has a database");
@@ -128,7 +131,17 @@ impl Storage {
                 }
             }
         });
-        Ok(Self { db: request.await? })
+        let mut db = request.await?;
+        db.on_version_change(|event| {
+            if let Some(db) = event
+                .target()
+                .and_then(|t| t.dyn_into::<web_sys::IdbDatabase>().ok())
+            {
+                db.close();
+            }
+            on_closed();
+        });
+        Ok(Self { db })
     }
 
     /// Local lists, oldest first.
