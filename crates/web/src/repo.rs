@@ -97,6 +97,15 @@ impl Repo {
         docs.get(&id).map(|d| d.view.clone().into())
     }
 
+    /// Whether a local list has any contents yet. A list added by
+    /// [`ensure`](Self::ensure) has none until its first sync. Untracked.
+    pub fn has_contents(&self, id: DocId) -> bool {
+        let inner = self.inner.get_value();
+        let mut docs = inner.docs.borrow_mut();
+        docs.get_mut(&id)
+            .is_some_and(|d| !d.doc.get_heads().is_empty())
+    }
+
     pub fn create_list(&self, title: String) -> DocId {
         let id = DocId::new();
         let mut doc = AutoCommit::new();
