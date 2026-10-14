@@ -8,24 +8,61 @@ use supp_shared::{
     schema::{Item, ListDoc},
 };
 
-use crate::repo::Repo;
+use crate::{
+    repo::Repo,
+    session::{Session, SessionChecked},
+    sync::SyncStatus,
+};
 
 #[component]
 pub fn ListPage() -> impl IntoView {
     let repo = expect_context::<Repo>();
+    let session = expect_context::<RwSignal<Session>>();
+    let status = expect_context::<RwSignal<SyncStatus>>();
+    let checked = expect_context::<SessionChecked>().0;
     let params = use_params_map();
-    let found = move || {
-        let id: DocId = params.with(|p| p.get("id")?.parse().ok())?;
-        Some((id, repo.list(id)?))
+    let id = Memo::new(move |_| params.with(|p| p.get("id")?.parse::<DocId>().ok()));
+    // On this device, though perhaps still empty: a list just joined
+    // through a share link arrives from the sync loop's Welcome, and its
+    // contents a moment later. Memos, so other lists coming and going don't
+    // re-render the page.
+    let local = Memo::new(move |_| id.get().filter(|id| repo.lists().with(|l| l.contains(id))));
+    let ready = Memo::new(move |_| {
+        let id = local.get()?;
+        let list = repo.list(id)?;
+        list.track();
+        repo.has_contents(id).then_some(id)
+    });
+    let loading = move || {
+        let signed_in = matches!(session.get(), Session::SignedIn(_));
+        !checked.get()
+            || signed_in
+                && match status.get() {
+                    SyncStatus::Idle | SyncStatus::Connecting => true,
+                    // The server has listed the account's lists by now.
+                    SyncStatus::Online => local.get().is_some(),
+                    SyncStatus::Offline | SyncStatus::UpgradeRequired => false,
+                }
     };
-    move || {
-        match found() {
-        Some((id, list)) => view! { <ListView id list /> }.into_any(),
-        None => view! {
-            <p class="status">"This list doesn't exist on this device. " <A href="/">"All lists"</A></p>
+    move || match ready.get() {
+        Some(id) => {
+            let list = repo.list(id).expect("ready lists are local");
+            view! { <ListView id list /> }.into_any()
+        }
+        None if loading() => view! { <p class="status" role="status">"Loading…"</p> }.into_any(),
+        None if local.get().is_some() => view! {
+            <p class="status">
+                "This list hasn't downloaded to this device yet. "
+                "It will once you're online and signed in. " <A href="/">"All lists"</A>
+            </p>
         }
         .into_any(),
-    }
+        None => view! {
+            <p class="status">
+                "This list doesn't exist on this device. " <A href="/">"All lists"</A>
+            </p>
+        }
+        .into_any(),
     }
 }
 

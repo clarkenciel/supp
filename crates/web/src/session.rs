@@ -26,6 +26,12 @@ pub enum Session {
     Mismatch { previous: Me, current: Me },
 }
 
+/// Whether the server has been asked who is signed in (or couldn't be
+/// reached). Until then a fresh device looks `Anonymous` even when it has
+/// just signed in.
+#[derive(Clone, Copy)]
+pub struct SessionChecked(pub RwSignal<bool>);
+
 impl Session {
     pub fn from_stored(stored: Option<Me>) -> Self {
         stored.map_or(Self::Anonymous, Self::SignedIn)

@@ -17,7 +17,7 @@ use crate::{
     overview::Overview,
     pwa::NewVersion,
     repo::Repo,
-    session::{AccountBar, Session},
+    session::{AccountBar, Session, SessionChecked},
     sync::SyncStatus,
 };
 
@@ -54,12 +54,17 @@ fn App(repo: Repo, session: Session) -> impl IntoView {
     let session = RwSignal::new(session);
     let status = RwSignal::new(SyncStatus::Idle);
     let new_version = NewVersion(RwSignal::new(false));
+    let checked = SessionChecked(RwSignal::new(false));
     provide_context(repo);
     provide_context(session);
     provide_context(status);
     provide_context(new_version);
+    provide_context(checked);
     leptos::task::spawn_local(pwa::watch_for_updates(new_version.0));
-    leptos::task::spawn_local(session::resolve(repo, session));
+    leptos::task::spawn_local(async move {
+        session::resolve(repo, session).await;
+        checked.0.set(true);
+    });
     sync::run_while_signed_in(repo, session, status);
     view! {
         <main>

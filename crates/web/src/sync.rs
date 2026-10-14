@@ -204,7 +204,6 @@ impl Connection {
         match message.msg {
             Some(Msg::Welcome(welcome)) => {
                 self.welcomed = true;
-                status.set(SyncStatus::Online);
                 let left = self.repo.left_docs().await.unwrap_or_else(|err| {
                     logging::error!("reading pending leaves: {err}");
                     Vec::new()
@@ -218,6 +217,9 @@ impl Connection {
                         self.repo.ensure(id);
                     }
                 }
+                // Only now, so a list page waiting for a list sees it
+                // arrive before it hears that the server has answered.
+                status.set(SyncStatus::Online);
                 for id in self.repo.ids() {
                     self.subscribe(id).await?;
                 }
