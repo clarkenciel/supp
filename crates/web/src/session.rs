@@ -80,6 +80,15 @@ pub async fn resolve(repo: Repo, session: RwSignal<Session>) {
     session.set(resolved);
 }
 
+/// The server says nobody is signed in: a `SignedIn` session has ended.
+pub fn expire(session: RwSignal<Session>) {
+    session.update(|s| {
+        if let Session::SignedIn(me) = s {
+            *s = Session::Expired(me.clone());
+        }
+    });
+}
+
 /// Makes `me` the owner of the local lists.
 pub async fn adopt(repo: Repo, me: Me) -> Session {
     if let Err(err) = repo.set_account(&me).await {

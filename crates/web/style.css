@@ -157,3 +157,55 @@ button.link {
 
 .sync-status { color: var(--muted); }
 .sync-status[data-status="Offline"] { color: var(--danger); }
+
+select {
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 0.375rem;
+  padding: 0.5rem;
+}
+
+.share {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.share p { margin: 0; }
+.share .hint { color: var(--muted); font-size: 0.875rem; }
+
+form.share-new {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+form.share-new label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.share-created { display: flex; gap: 0.5rem; }
+.share-created input { flex: 1; }
+
+.share-links li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.875rem;
+}
+
+.share-links button { font-size: 0.875rem; padding: 0.25rem 0.5rem; }
