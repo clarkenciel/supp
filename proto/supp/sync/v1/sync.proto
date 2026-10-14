@@ -1,0 +1,63 @@
+// Sync protocol between clients and the server over a single WebSocket.
+//
+// Evolution rules: never reuse a field number, mark removed fields `reserved`,
+// and ignore unknown `oneof` variants rather than failing.
+syntax = "proto3";
+
+package supp.sync.v1;
+
+message ClientMessage {
+  oneof msg {
+    Hello hello = 1;
+    Subscribe subscribe = 2;
+    SyncPayload sync = 3;
+    Unsubscribe unsubscribe = 4;
+  }
+}
+
+message ServerMessage {
+  oneof msg {
+    Welcome welcome = 1;
+    SyncPayload sync = 2;
+    Denied denied = 3;
+    Error error = 4;
+    UpgradeRequired upgrade = 5;
+  }
+}
+
+// First message on every connection.
+message Hello {
+  uint32 protocol_version = 1;
+  string client_build = 2;
+}
+
+message Welcome {
+  uint32 protocol_version = 1;
+}
+
+// Sent instead of Welcome when the client's protocol version is unsupported.
+message UpgradeRequired {
+  uint32 min_protocol_version = 1;
+}
+
+message Subscribe {
+  bytes doc_id = 1; // 16-byte UUID
+}
+
+message Unsubscribe {
+  bytes doc_id = 1;
+}
+
+message SyncPayload {
+  bytes doc_id = 1;
+  bytes data = 2; // encoded automerge sync message
+}
+
+message Denied {
+  bytes doc_id = 1;
+  string reason = 2;
+}
+
+message Error {
+  string message = 1;
+}
