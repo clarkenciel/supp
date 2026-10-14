@@ -23,6 +23,9 @@ pub enum TabMessage {
     Added(DocId),
     /// A list was removed from this device.
     Removed(DocId),
+    /// The stored account changed, or was confirmed: a user ID, or `None`
+    /// after signing out (which erases every list).
+    Account(Option<i64>),
 }
 
 impl fmt::Display for TabMessage {
@@ -31,6 +34,8 @@ impl fmt::Display for TabMessage {
             Self::Chunk(id, chunk) => write!(f, "chunk {id} {chunk}"),
             Self::Added(id) => write!(f, "added {id}"),
             Self::Removed(id) => write!(f, "removed {id}"),
+            Self::Account(Some(user)) => write!(f, "account {user}"),
+            Self::Account(None) => write!(f, "account"),
         }
     }
 }
@@ -44,6 +49,8 @@ impl TabMessage {
             ("chunk", Some(id), Some(chunk)) => Self::Chunk(id.parse().ok()?, chunk.to_string()),
             ("added", Some(id), None) => Self::Added(id.parse().ok()?),
             ("removed", Some(id), None) => Self::Removed(id.parse().ok()?),
+            ("account", Some(user), None) => Self::Account(Some(user.parse().ok()?)),
+            ("account", None, None) => Self::Account(None),
             _ => return None,
         };
         words.next().is_none().then_some(message)
@@ -104,11 +111,13 @@ mod tests {
             TabMessage::Chunk(id, uuid::Uuid::new_v4().to_string()),
             TabMessage::Added(id),
             TabMessage::Removed(id),
+            TabMessage::Account(Some(42)),
+            TabMessage::Account(None),
         ] {
             assert_eq!(TabMessage::parse(&message.to_string()), Some(message));
         }
         let extra = format!("removed {id} extra");
-        for junk in ["", "chunk", "added nope", &extra, "hello"] {
+        for junk in ["", "chunk", "added nope", "account x", &extra, "hello"] {
             assert_eq!(TabMessage::parse(junk), None, "{junk}");
         }
     }

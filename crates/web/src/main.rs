@@ -73,7 +73,7 @@ fn App(repo: Repo, session: Session) -> impl IntoView {
         session::resolve(repo, session).await;
         checked.0.set(true);
     });
-    repo.follow_other_tabs();
+    repo.follow_other_tabs(move |user| session::account_changed_elsewhere(session, user));
     sync::run_while_signed_in(repo, session, status);
     view! {
         <main>

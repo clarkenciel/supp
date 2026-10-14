@@ -89,6 +89,29 @@ pub fn expire(session: RwSignal<Session>) {
     });
 }
 
+/// Another tab has stored `user` as this device's account (`None`: signed
+/// out). If this tab's session doesn't match, it reloads.
+///
+/// Reloading, rather than patching this tab's state, because an account
+/// change is rare and touches everything a tab derives at startup from
+/// storage and `/api/me`: the session, the sync loop's connection, and,
+/// after signing out or settling a mismatch by erasing, every list. A fresh
+/// start can't keep anything stale. It can't loop either: the message is
+/// sent only on adopting the account `/api/me` reports or on signing out,
+/// tabs share the session cookie, so a reloaded tab that adopts agrees with
+/// the sender, and tabs that agree ignore the message.
+pub fn account_changed_elsewhere(session: RwSignal<Session>, user: Option<i64>) {
+    let agrees = session.with_untracked(|s| match s {
+        Session::Anonymous => user.is_none(),
+        Session::SignedIn(me) => user == Some(me.user_id),
+        // Signed in again, signed out, or the mismatch was settled.
+        Session::Expired(_) | Session::Mismatch { .. } => false,
+    });
+    if !agrees {
+        let _ = window().location().reload();
+    }
+}
+
 /// Makes `me` the owner of the local lists.
 pub async fn adopt(repo: Repo, me: Me) -> Session {
     if let Err(err) = repo.set_account(&me).await {
@@ -109,6 +132,7 @@ pub async fn sign_out(repo: Repo) -> Result<(), String> {
         return Err(format!("Sign-out failed ({}).", response.status()));
     }
     repo.erase_all().await.map_err(|e| e.to_string())?;
+    repo.announce_signed_out();
     Ok(())
 }
 

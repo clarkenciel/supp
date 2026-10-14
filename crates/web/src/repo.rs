@@ -281,11 +281,24 @@ impl Repo {
         self.inner.get_value().storage.account().await
     }
 
+    /// Records the account this device's lists belong to, and tells the
+    /// other tabs.
     pub async fn set_account(&self, me: &Me) -> Result<(), StorageError> {
-        self.inner.get_value().storage.set_account(me).await
+        let inner = self.inner.get_value();
+        inner.storage.set_account(me).await?;
+        inner.tabs.post(&TabMessage::Account(Some(me.user_id)));
+        Ok(())
     }
 
-    /// Forgets every list, on this device only.
+    /// Tells the other tabs that this device has signed out (and so been
+    /// erased).
+    pub fn announce_signed_out(&self) {
+        self.inner.get_value().tabs.post(&TabMessage::Account(None));
+    }
+
+    /// Forgets every list, on this device only. Other tabs are not told:
+    /// erasing always comes with an account change, which the caller
+    /// announces once it is complete.
     pub async fn erase_all(&self) -> Result<(), StorageError> {
         let inner = self.inner.get_value();
         inner.storage.clear().await?;
@@ -318,10 +331,11 @@ impl Repo {
         });
     }
 
-    /// Starts applying what other tabs write. Messages are handled one at a
-    /// time, in order, so a list added and removed in quick succession can't
-    /// come back.
-    pub fn follow_other_tabs(&self) {
+    /// Starts applying what other tabs write. Account changes go to
+    /// `on_account`, since what they mean depends on this tab's session.
+    /// Messages are handled one at a time, in order, so a list added and
+    /// removed in quick succession can't come back.
+    pub fn follow_other_tabs(&self, on_account: impl Fn(Option<i64>) + 'static) {
         let Some(mut messages) = self.inner.get_value().from_tabs.take() else {
             return;
         };
@@ -332,6 +346,7 @@ impl Repo {
                     TabMessage::Chunk(id, chunk) => repo.load_chunk(id, chunk).await,
                     TabMessage::Added(id) => repo.load_list(id).await,
                     TabMessage::Removed(id) => repo.drop_removed(id),
+                    TabMessage::Account(user) => on_account(user),
                 }
             }
         });
