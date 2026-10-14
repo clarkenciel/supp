@@ -1,0 +1,133 @@
+:root {
+  color-scheme: light dark;
+  --bg: #fafaf9;
+  --fg: #1c1917;
+  --muted: #78716c;
+  --line: #e7e5e4;
+  --accent: #2563eb;
+  --danger: #dc2626;
+  font-family: system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1917;
+    --fg: #f5f5f4;
+    --muted: #a8a29e;
+    --line: #44403c;
+    --accent: #60a5fa;
+    --danger: #f87171;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+h1 { margin: 0; font-size: 1.5rem; }
+
+a { color: var(--accent); }
+
+input[type="text"] {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 0.375rem;
+  padding: 0.5rem;
+  min-width: 0;
+}
+
+button {
+  font: inherit;
+  border: 1px solid var(--line);
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+}
+
+button:disabled { opacity: 0.3; cursor: default; }
+button.secondary { background: transparent; color: var(--fg); }
+button.danger { background: transparent; color: var(--danger); border-color: var(--danger); }
+button.icon {
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  padding: 0.5rem;
+  min-width: 2.25rem;
+}
+
+.back {
+  font-size: 1.75rem;
+  text-decoration: none;
+  padding: 0 0.5rem;
+}
+
+.list-title {
+  flex: 1;
+  font-size: 1.25rem !important;
+  font-weight: 600;
+  border-color: transparent !important;
+}
+
+ul { list-style: none; margin: 0; padding: 0; }
+
+.lists li a {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.75rem 0.25rem;
+  border-bottom: 1px solid var(--line);
+  text-decoration: none;
+  color: inherit;
+}
+
+.progress { color: var(--muted); }
+
+.items li {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.25rem 0;
+}
+
+.items input[type="checkbox"] { width: 1.25rem; height: 1.25rem; margin: 0 0.5rem; }
+.items .text { flex: 1; border-color: transparent; }
+.items li.done .text { text-decoration: line-through; color: var(--muted); }
+
+form.add {
+  display: flex;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+form.add input { flex: 1; }
+
+footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 2rem;
+}
+
+.status { color: var(--muted); }
+.status.error { color: var(--danger); }
