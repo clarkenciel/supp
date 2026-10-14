@@ -10,7 +10,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use automerge::{AutoCommit, ChangeHash};
 use autosurgeon::{hydrate, reconcile};
 use leptos::{logging, prelude::*, task::spawn_local};
-use supp_shared::{DocId, schema::ListDoc};
+use supp_shared::{DocId, proto::api::v1::Me, schema::ListDoc};
 use wasm_bindgen::JsValue;
 
 use crate::storage::{Storage, StorageError};
@@ -120,6 +120,23 @@ impl Repo {
             open.view.set(hydrate_or_default(&open.doc, id));
         }
         spawn_local(persist(inner, id));
+    }
+
+    pub async fn account(&self) -> Result<Option<Me>, StorageError> {
+        self.inner.get_value().storage.account().await
+    }
+
+    pub async fn set_account(&self, me: &Me) -> Result<(), StorageError> {
+        self.inner.get_value().storage.set_account(me).await
+    }
+
+    /// Forgets every list, on this device only.
+    pub async fn erase_all(&self) -> Result<(), StorageError> {
+        let inner = self.inner.get_value();
+        inner.storage.clear().await?;
+        inner.docs.borrow_mut().clear();
+        self.lists.set(Vec::new());
+        Ok(())
     }
 
     /// A write already in flight may land after the delete; its chunk is

@@ -131,3 +131,26 @@ footer {
 
 .status { color: var(--muted); }
 .status.error { color: var(--danger); }
+
+nav.account {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  justify-content: flex-end;
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+}
+
+nav.account .muted, nav.account .who { color: var(--muted); }
+nav.account .banner { flex-basis: 100%; text-align: right; }
+nav.account .banner.error { color: var(--danger); }
+nav.account button { font-size: 0.875rem; padding: 0.25rem 0.5rem; }
+
+button.link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  padding: 0;
+  text-decoration: underline;
+}
