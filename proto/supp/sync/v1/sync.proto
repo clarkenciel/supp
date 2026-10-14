@@ -22,6 +22,7 @@ message ServerMessage {
     Denied denied = 3;
     Error error = 4;
     UpgradeRequired upgrade = 5;
+    SessionEnded session_ended = 6;
   }
 }
 
@@ -33,6 +34,8 @@ message Hello {
 
 message Welcome {
   uint32 protocol_version = 1;
+  // Lists the user belongs to, including ones not yet on this device.
+  repeated bytes doc_ids = 2;
 }
 
 // Sent instead of Welcome when the client's protocol version is unsupported.
@@ -57,6 +60,10 @@ message Denied {
   bytes doc_id = 1;
   string reason = 2;
 }
+
+// The session expired, was logged out, or the account was disabled. The
+// server closes the connection after sending this; sign in again.
+message SessionEnded {}
 
 message Error {
   string message = 1;

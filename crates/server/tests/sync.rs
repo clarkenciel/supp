@@ -10,7 +10,9 @@ use autosurgeon::{hydrate, reconcile};
 use futures_util::{SinkExt, StreamExt};
 use prost::Message as _;
 use supp_server::{
-    AppState, Docs, Store, app,
+    AppState, Docs, Store,
+    accounts::{Accounts, Identity, NewInvite, Token, UserId},
+    app,
     auth::{AuthConfig, DevProvider},
 };
 use supp_shared::{
@@ -21,13 +23,17 @@ use supp_shared::{
     schema::{Item, ListDoc},
 };
 use tokio::{net::TcpStream, sync::oneshot, task::JoinHandle};
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
+use tokio_tungstenite::{
+    MaybeTlsStream, WebSocketStream, connect_async,
+    tungstenite::{Message, client::IntoClientRequest, http::HeaderValue},
+};
 
 const DEADLINE: Duration = Duration::from_secs(5);
 
 struct Server {
     addr: SocketAddr,
     store: Store,
+    accounts: Accounts,
     shutdown: oneshot::Sender<()>,
     task: JoinHandle<()>,
 }
@@ -51,10 +57,38 @@ impl Server {
         });
         Self {
             addr,
+            accounts: store.accounts(),
             store,
             shutdown,
             task,
         }
+    }
+
+    /// Signs `name` up (or in) and returns a session token and user ID.
+    async fn session(&self, name: &str) -> (Token, UserId) {
+        let invite = NewInvite {
+            doc_id: None,
+            created_by: None,
+            note: String::new(),
+            ttl: Duration::from_secs(60),
+            max_uses: 1,
+        };
+        let (_, invite) = self.accounts.create_invite(invite).await.unwrap();
+        let identity = Identity {
+            subject: format!("test:{name}"),
+            email: format!("{name}@example.com"),
+            name: name.into(),
+        };
+        let user = self
+            .accounts
+            .login(&identity, Some(&invite))
+            .await
+            .unwrap()
+            .user;
+        (
+            self.accounts.create_session(user.id).await.unwrap(),
+            user.id,
+        )
     }
 
     async fn stop(self) {
@@ -66,8 +100,20 @@ impl Server {
 
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-async fn connect_raw(addr: SocketAddr) -> Ws {
-    connect_async(format!("ws://{addr}/sync")).await.unwrap().0
+async fn try_connect(addr: SocketAddr, session: Option<&Token>) -> Result<Ws, String> {
+    let mut request = format!("ws://{addr}/sync").into_client_request().unwrap();
+    if let Some(token) = session {
+        let cookie = HeaderValue::from_str(&format!("supp_session={}", token.as_str())).unwrap();
+        request.headers_mut().insert("cookie", cookie);
+    }
+    connect_async(request)
+        .await
+        .map(|(ws, _)| ws)
+        .map_err(|e| e.to_string())
+}
+
+async fn connect_raw(addr: SocketAddr, session: &Token) -> Ws {
+    try_connect(addr, Some(session)).await.unwrap()
 }
 
 async fn send(ws: &mut Ws, msg: client_message::Msg) {
@@ -101,8 +147,8 @@ struct Client {
 }
 
 impl Client {
-    async fn connect(addr: SocketAddr, id: DocId, doc: AutoCommit) -> Self {
-        let mut ws = connect_raw(addr).await;
+    async fn connect(addr: SocketAddr, session: &Token, id: DocId, doc: AutoCommit) -> Self {
+        let mut ws = connect_raw(addr, session).await;
         send(&mut ws, hello(PROTOCOL_VERSION)).await;
         assert!(matches!(
             recv(&mut ws).await,
@@ -203,16 +249,17 @@ fn titled(title: &'static str) -> impl Fn(&ListDoc) -> bool {
 async fn two_clients_converge() {
     let dir = tempfile::tempdir().unwrap();
     let server = Server::start(&dir.path().join("supp.db"), 100).await;
+    let (session, _) = server.session("alice").await;
     let id = DocId::new();
 
-    let mut a = Client::connect(server.addr, id, AutoCommit::new()).await;
+    let mut a = Client::connect(server.addr, &session, id, AutoCommit::new()).await;
     a.edit(|l| {
         l.title = "groceries".into();
         l.items.insert("milk".into(), item("milk", "a0"));
     })
     .await;
 
-    let mut b = Client::connect(server.addr, id, AutoCommit::new()).await;
+    let mut b = Client::connect(server.addr, &session, id, AutoCommit::new()).await;
     b.until(titled("groceries")).await;
 
     // Concurrent edits from both sides; each must reach the other.
@@ -241,7 +288,8 @@ async fn persists_across_restart_and_compacts() {
     let id = DocId::new();
 
     let server = Server::start(&db, 3).await;
-    let mut a = Client::connect(server.addr, id, AutoCommit::new()).await;
+    let (session, _) = server.session("alice").await;
+    let mut a = Client::connect(server.addr, &session, id, AutoCommit::new()).await;
     for i in 0..7 {
         a.edit(|l| {
             l.title = "chores".into();
@@ -251,14 +299,15 @@ async fn persists_across_restart_and_compacts() {
         .await;
     }
     // A second client seeing every item proves the server applied them.
-    let mut b = Client::connect(server.addr, id, AutoCommit::new()).await;
+    let mut b = Client::connect(server.addr, &session, id, AutoCommit::new()).await;
     b.until(|l| l.items.len() == 7).await;
     drop((a, b));
     server.stop().await;
 
     let server = Server::start(&db, 3).await;
+    let (session, _) = server.session("alice").await;
     assert!(server.store.change_rows(id).await.unwrap() < 3);
-    let mut c = Client::connect(server.addr, id, AutoCommit::new()).await;
+    let mut c = Client::connect(server.addr, &session, id, AutoCommit::new()).await;
     c.until(|l| l.title == "chores" && l.items.len() == 7).await;
     server.stop().await;
 }
@@ -267,11 +316,12 @@ async fn persists_across_restart_and_compacts() {
 async fn offline_edits_sync_on_reconnect() {
     let dir = tempfile::tempdir().unwrap();
     let server = Server::start(&dir.path().join("supp.db"), 100).await;
+    let (session, _) = server.session("alice").await;
     let id = DocId::new();
 
-    let mut a = Client::connect(server.addr, id, AutoCommit::new()).await;
+    let mut a = Client::connect(server.addr, &session, id, AutoCommit::new()).await;
     a.edit(|l| l.title = "trip".into()).await;
-    let mut b = Client::connect(server.addr, id, AutoCommit::new()).await;
+    let mut b = Client::connect(server.addr, &session, id, AutoCommit::new()).await;
     b.until(titled("trip")).await;
 
     // B goes offline and edits locally; sync state resets on reconnect.
@@ -281,7 +331,7 @@ async fn offline_edits_sync_on_reconnect() {
     list.items.insert("tent".into(), item("tent", "a0"));
     reconcile(&mut offline, &list).unwrap();
 
-    let mut b = Client::connect(server.addr, id, offline).await;
+    let mut b = Client::connect(server.addr, &session, id, offline).await;
     b.settle().await;
     a.until(|l| l.items.contains_key("tent")).await;
 
@@ -292,8 +342,9 @@ async fn offline_edits_sync_on_reconnect() {
 async fn rejects_old_protocol_version() {
     let dir = tempfile::tempdir().unwrap();
     let server = Server::start(&dir.path().join("supp.db"), 100).await;
+    let (session, _) = server.session("alice").await;
 
-    let mut ws = connect_raw(server.addr).await;
+    let mut ws = connect_raw(server.addr, &session).await;
     send(&mut ws, hello(0)).await;
     assert!(matches!(
         recv(&mut ws).await,
@@ -308,8 +359,9 @@ async fn rejects_old_protocol_version() {
 async fn requires_hello_first() {
     let dir = tempfile::tempdir().unwrap();
     let server = Server::start(&dir.path().join("supp.db"), 100).await;
+    let (session, _) = server.session("alice").await;
 
-    let mut ws = connect_raw(server.addr).await;
+    let mut ws = connect_raw(server.addr, &session).await;
     let subscribe = client_message::Msg::Subscribe(Subscribe {
         doc_id: DocId::new().as_bytes().to_vec(),
     });
@@ -327,8 +379,9 @@ async fn requires_hello_first() {
 async fn sync_requires_subscription() {
     let dir = tempfile::tempdir().unwrap();
     let server = Server::start(&dir.path().join("supp.db"), 100).await;
+    let (session, _) = server.session("alice").await;
 
-    let mut ws = connect_raw(server.addr).await;
+    let mut ws = connect_raw(server.addr, &session).await;
     send(&mut ws, hello(PROTOCOL_VERSION)).await;
     recv(&mut ws).await;
     let mut doc = AutoCommit::new();
@@ -345,6 +398,84 @@ async fn sync_requires_subscription() {
         recv(&mut ws).await,
         Some(server_message::Msg::Error(_))
     ));
+
+    server.stop().await;
+}
+
+async fn welcome(ws: &mut Ws) -> Vec<DocId> {
+    send(ws, hello(PROTOCOL_VERSION)).await;
+    match recv(ws).await {
+        Some(server_message::Msg::Welcome(w)) => w
+            .doc_ids
+            .iter()
+            .map(|b| DocId::from_bytes(b).unwrap())
+            .collect(),
+        other => panic!("expected welcome, got {other:?}"),
+    }
+}
+
+fn subscribe(id: DocId) -> client_message::Msg {
+    client_message::Msg::Subscribe(Subscribe {
+        doc_id: id.as_bytes().to_vec(),
+    })
+}
+
+#[tokio::test]
+async fn refuses_unauthenticated_connections() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = Server::start(&dir.path().join("supp.db"), 100).await;
+
+    let err = try_connect(server.addr, None).await.unwrap_err();
+    assert!(err.contains("401"), "{err}");
+    let err = try_connect(server.addr, Some(&Token::generate()))
+        .await
+        .unwrap_err();
+    assert!(err.contains("401"), "{err}");
+
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn lists_belong_to_whoever_syncs_them_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = Server::start(&dir.path().join("supp.db"), 100).await;
+    let (alice, _) = server.session("alice").await;
+    let (bob, _) = server.session("bob").await;
+    let id = DocId::new();
+
+    let mut a = Client::connect(server.addr, &alice, id, AutoCommit::new()).await;
+    a.edit(|l| l.title = "alice's".into()).await;
+
+    let mut ws = connect_raw(server.addr, &bob).await;
+    assert!(welcome(&mut ws).await.is_empty());
+    send(&mut ws, subscribe(id)).await;
+    match recv(&mut ws).await {
+        Some(server_message::Msg::Denied(d)) => assert_eq!(d.doc_id, id.as_bytes()),
+        other => panic!("expected denied, got {other:?}"),
+    }
+
+    // Alice's other devices learn about the list from the welcome.
+    let mut ws = connect_raw(server.addr, &alice).await;
+    assert_eq!(welcome(&mut ws).await, vec![id]);
+
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn ended_sessions_are_told_and_disconnected() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = Server::start(&dir.path().join("supp.db"), 100).await;
+    let (session, user) = server.session("alice").await;
+
+    let mut ws = connect_raw(server.addr, &session).await;
+    welcome(&mut ws).await;
+    server.accounts.disable_user(user).await.unwrap();
+    send(&mut ws, subscribe(DocId::new())).await;
+    assert!(matches!(
+        recv(&mut ws).await,
+        Some(server_message::Msg::SessionEnded(_))
+    ));
+    assert!(recv(&mut ws).await.is_none());
 
     server.stop().await;
 }
