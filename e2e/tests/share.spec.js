@@ -26,6 +26,26 @@ async function reopenSharePanel(page) {
   await shareButton(page).click();
 }
 
+/** How many deleted lists the page's device still has to leave. */
+function pendingLeaves(page) {
+  return page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open('supp');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const db = open.result;
+          const count = db.transaction('left').objectStore('left').count();
+          count.onerror = () => reject(count.error);
+          count.onsuccess = () => {
+            db.close();
+            resolve(count.result);
+          };
+        };
+      }),
+  );
+}
+
 /** Tries to sign up through `link` as someone new, and expects to be turned away. */
 async function expectRefused(browser, link) {
   const page = await (await browser.newContext()).newPage();
@@ -85,6 +105,42 @@ test('an existing user joins through a share link', async ({ browser }) => {
   await expectItems(friend, ['bread']);
   await friend.goto('/');
   await expect(friend.locator('ul.lists li')).toHaveText([/Own/, /Shared/]);
+});
+
+test('rejoining a list deleted offline keeps it', async ({ browser }) => {
+  const owner = await (await browser.newContext()).newPage();
+  await signIn(owner, invite(), uniqueName('owner'));
+  await createList(owner, 'Again');
+  await addItem(owner, 'soap');
+  const link = await shareLink(owner, '5');
+
+  const friendName = uniqueName('friend');
+  const context = await browser.newContext();
+  const friend = await context.newPage();
+  await signIn(friend, link, friendName);
+  await expectItems(friend, ['soap']);
+
+  // Deleted offline: the leave waits for the next connection...
+  await goOffline(context);
+  friend.once('dialog', (dialog) => dialog.accept());
+  await friend.getByRole('button', { name: 'Delete list' }).click();
+  await expect.poll(() => pendingLeaves(friend)).toBe(1);
+  // ...but the app is closed before it gets one, and the friend rejoins
+  // through the link later (say, from an email).
+  await friend.close();
+  await context.unroute('**');
+  await context.setOffline(false);
+  const again = await context.newPage();
+  await signIn(again, link, friendName);
+  await expect(again).toHaveURL(owner.url());
+  await expectItems(again, ['soap']);
+  expect(await pendingLeaves(again)).toBe(0);
+
+  // Still a member: edits arrive, and the account still has the list.
+  await addItem(owner, 'towels');
+  await expectItems(again, ['soap', 'towels']);
+  await again.reload();
+  await expectItems(again, ['soap', 'towels']);
 });
 
 test('used-up and revoked links are refused', async ({ browser }) => {
