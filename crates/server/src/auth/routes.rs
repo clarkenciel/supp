@@ -12,14 +12,13 @@ use std::collections::HashMap;
 
 use axum::{
     extract::{Path, Query, State},
-    http::{StatusCode, header},
+    http::StatusCode,
     response::{Html, IntoResponse, Redirect, Response},
 };
 use axum_extra::extract::{
     CookieJar, PrivateCookieJar,
     cookie::{Cookie, SameSite},
 };
-use prost::Message as _;
 use serde::{Deserialize, Serialize};
 use supp_shared::proto::api::v1::Me;
 
@@ -30,6 +29,7 @@ use super::{
 use crate::{
     AppState,
     accounts::{LoginError, SESSION_TTL, Token},
+    api::Protobuf,
 };
 
 const LOGIN_COOKIE: &str = "supp_login";
@@ -182,17 +182,12 @@ pub async fn logout(State(app): State<AppState>, jar: CookieJar) -> Response {
     (jar, StatusCode::NO_CONTENT).into_response()
 }
 
-pub async fn me(AuthUser(user): AuthUser) -> Response {
-    let me = Me {
+pub async fn me(AuthUser(user): AuthUser) -> Protobuf<Me> {
+    Protobuf(Me {
         user_id: user.id.0,
         email: user.email,
         name: user.name,
-    };
-    (
-        [(header::CONTENT_TYPE, "application/x-protobuf")],
-        me.encode_to_vec(),
-    )
-        .into_response()
+    })
 }
 
 pub async fn dev_sign_in(Query(params): Query<HashMap<String, String>>) -> Html<String> {

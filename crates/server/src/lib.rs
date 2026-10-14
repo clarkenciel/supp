@@ -2,6 +2,7 @@
 
 pub mod accounts;
 pub mod admin;
+pub mod api;
 pub mod auth;
 pub mod connection;
 pub mod docs;
@@ -15,7 +16,7 @@ use axum::{
     extract::{FromRef, Request, State},
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use axum_extra::extract::cookie::Key;
 use tower::ServiceExt;
@@ -61,7 +62,15 @@ pub fn app(state: AppState) -> Router {
         .route("/auth/callback", get(auth::routes::callback))
         .route("/auth/logout", post(auth::routes::logout))
         .route("/join/{token}", get(auth::routes::join))
-        .route("/api/me", get(auth::routes::me));
+        .route("/api/me", get(auth::routes::me))
+        .route(
+            "/api/lists/{doc_id}/invites",
+            get(api::share_links).post(api::create_share_link),
+        )
+        .route(
+            "/api/lists/{doc_id}/invites/{id}",
+            delete(api::revoke_share_link),
+        );
     if state.auth.provider.is_dev() {
         router = router.route("/auth/dev", get(auth::routes::dev_sign_in));
     }

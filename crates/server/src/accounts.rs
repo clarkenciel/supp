@@ -92,6 +92,18 @@ pub struct InviteInfo {
     pub revoked: bool,
 }
 
+/// A list share link as its list's members see it.
+#[derive(Debug)]
+pub struct ShareLinkInfo {
+    pub id: InviteId,
+    pub created_by: UserId,
+    pub created_by_name: String,
+    pub created_at: i64,
+    pub expires_at: i64,
+    pub max_uses: i64,
+    pub uses: i64,
+}
+
 #[derive(Debug)]
 pub struct UserInfo {
     pub id: UserId,
@@ -197,6 +209,51 @@ impl Accounts {
                 .bind(id.0)
                 .execute(&self.pool)
                 .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    /// `doc`'s share links that are neither revoked nor expired, oldest
+    /// first. Used-up links are included until they expire.
+    pub async fn share_links(&self, doc: DocId) -> sqlx::Result<Vec<ShareLinkInfo>> {
+        let rows: Vec<ShareLinkRow> = sqlx::query_as(
+            "SELECT i.id, i.created_by, COALESCE(u.name, '') AS created_by_name, \
+             i.created_at, i.expires_at, i.max_uses, i.uses \
+             FROM invites i LEFT JOIN users u ON u.id = i.created_by \
+             WHERE i.doc_id = ? AND i.revoked_at IS NULL AND i.expires_at > ? \
+             ORDER BY i.id",
+        )
+        .bind(doc.as_bytes().as_slice())
+        .bind(now())
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| ShareLinkInfo {
+                id: InviteId(r.id),
+                created_by: UserId(r.created_by.unwrap_or_default()),
+                created_by_name: r.created_by_name,
+                created_at: r.created_at,
+                expires_at: r.expires_at,
+                max_uses: r.max_uses,
+                uses: r.uses,
+            })
+            .collect())
+    }
+
+    /// Revokes one of `doc`'s share links. Returns whether a live (unrevoked,
+    /// unexpired) link of that list was revoked.
+    pub async fn revoke_share_link(&self, doc: DocId, id: InviteId) -> sqlx::Result<bool> {
+        let now = now();
+        let result = sqlx::query(
+            "UPDATE invites SET revoked_at = ? \
+             WHERE id = ? AND doc_id = ? AND revoked_at IS NULL AND expires_at > ?",
+        )
+        .bind(now)
+        .bind(id.0)
+        .bind(doc.as_bytes().as_slice())
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
         Ok(result.rows_affected() == 1)
     }
 
@@ -415,6 +472,20 @@ impl Accounts {
         Ok(access)
     }
 
+    /// Whether `user` is an active member of `doc`, or `doc` has never had
+    /// members (a list its creator hasn't synced yet). Unlike
+    /// [`authorize`](Self::authorize), never claims the document.
+    pub async fn member_or_unclaimed(&self, user: UserId, doc: DocId) -> sqlx::Result<bool> {
+        sqlx::query_scalar(
+            "SELECT COUNT(*) = 0 OR COALESCE(MAX(user_id = ? AND left_at IS NULL), 0) \
+             FROM list_members WHERE doc_id = ?",
+        )
+        .bind(user.0)
+        .bind(doc.as_bytes().as_slice())
+        .fetch_one(&self.pool)
+        .await
+    }
+
     /// Marks `user` as having left the list. The document is kept, and a
     /// share link can bring them back.
     pub async fn leave(&self, user: UserId, doc: DocId) -> sqlx::Result<()> {
@@ -456,6 +527,17 @@ struct InviteRow {
     max_uses: i64,
     uses: i64,
     revoked: bool,
+}
+
+#[derive(sqlx::FromRow)]
+struct ShareLinkRow {
+    id: i64,
+    created_by: Option<i64>,
+    created_by_name: String,
+    created_at: i64,
+    expires_at: i64,
+    max_uses: i64,
+    uses: i64,
 }
 
 #[derive(sqlx::FromRow)]
