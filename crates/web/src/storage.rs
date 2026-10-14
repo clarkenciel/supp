@@ -13,8 +13,8 @@ use supp_shared::{DocId, proto::api::v1::Me};
 use wasm_bindgen::{JsCast, JsValue};
 
 const DB_NAME: &str = "supp";
-/// v1: docs, snapshots, changes. v2: meta.
-const DB_VERSION: u32 = 2;
+/// v1: docs, snapshots, changes. v2: meta. v3: left.
+const DB_VERSION: u32 = 3;
 
 /// doc id → creation time (ms since epoch). The set of local lists.
 const DOCS: &str = "docs";
@@ -22,6 +22,10 @@ const DOCS: &str = "docs";
 const SNAPSHOTS: &str = "snapshots";
 /// [doc id, chunk id] → incremental save output.
 const CHANGES: &str = "changes";
+/// doc id → true: lists deleted here whose Leave the server hasn't
+/// confirmed yet. Survives going offline, so the delete still reaches the
+/// account (and the list doesn't come back from the next Welcome).
+const LEFT: &str = "left";
 /// Small device-level records, keyed by name.
 const META: &str = "meta";
 /// META key: the account (protobuf `Me`) this device's lists belong to.
@@ -59,7 +63,7 @@ impl Storage {
             let existing = db.store_names();
             // Every version only adds stores, so creating whichever are
             // missing upgrades from any earlier version.
-            for name in [DOCS, SNAPSHOTS, CHANGES, META] {
+            for name in [DOCS, SNAPSHOTS, CHANGES, META, LEFT] {
                 if !existing.iter().any(|n| n == name) {
                     db.create_object_store(name, ObjectStoreParams::new())
                         .expect("create object store");
@@ -148,6 +152,25 @@ impl Storage {
         Ok(())
     }
 
+    /// Lists with a pending leave.
+    pub async fn left_docs(&self) -> Result<Vec<DocId>> {
+        let tx = self.db.transaction(&[LEFT], TransactionMode::ReadOnly)?;
+        let keys = tx.object_store(LEFT)?.get_all_keys(None, None)?.await?;
+        tx.await?;
+        Ok(keys
+            .iter()
+            .filter_map(|k| k.as_string()?.parse().ok())
+            .collect())
+    }
+
+    /// The server confirmed the leave.
+    pub async fn forget_left(&self, id: DocId) -> Result<()> {
+        let tx = self.db.transaction(&[LEFT], TransactionMode::ReadWrite)?;
+        tx.object_store(LEFT)?.delete(doc_key(id))?.await?;
+        tx.commit()?.await?;
+        Ok(())
+    }
+
     pub async fn account(&self) -> Result<Option<Me>> {
         let tx = self.db.transaction(&[META], TransactionMode::ReadOnly)?;
         let value = tx
@@ -174,7 +197,7 @@ impl Storage {
 
     /// Erases everything: every list and the account record.
     pub async fn clear(&self) -> Result<()> {
-        let stores = [DOCS, SNAPSHOTS, CHANGES, META];
+        let stores = [DOCS, SNAPSHOTS, CHANGES, META, LEFT];
         let tx = self.db.transaction(&stores, TransactionMode::ReadWrite)?;
         for name in stores {
             tx.object_store(name)?.clear()?.await?;
@@ -183,10 +206,15 @@ impl Storage {
         Ok(())
     }
 
+    /// Deletes a list and records a pending leave for it.
     pub async fn delete_doc(&self, id: DocId) -> Result<()> {
-        let tx = self
-            .db
-            .transaction(&[DOCS, SNAPSHOTS, CHANGES], TransactionMode::ReadWrite)?;
+        let tx = self.db.transaction(
+            &[DOCS, SNAPSHOTS, CHANGES, LEFT],
+            TransactionMode::ReadWrite,
+        )?;
+        tx.object_store(LEFT)?
+            .put(&JsValue::TRUE, Some(&doc_key(id)))?
+            .await?;
         tx.object_store(DOCS)?.delete(doc_key(id))?.await?;
         tx.object_store(SNAPSHOTS)?.delete(doc_key(id))?.await?;
         tx.object_store(CHANGES)?.delete(chunk_range(id)?)?.await?;
