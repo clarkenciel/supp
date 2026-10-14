@@ -2762,6 +2762,7 @@ name = "supp-web"
 version = "0.1.0"
 dependencies = [
  "automerge",
+ "autosurgeon",
  "console_error_panic_hook",
  "idb",
  "js-sys",
