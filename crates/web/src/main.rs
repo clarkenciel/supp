@@ -15,6 +15,7 @@ use leptos_router::{
 use crate::{
     list_page::ListPage,
     overview::Overview,
+    pwa::NewVersion,
     repo::Repo,
     session::{AccountBar, Session},
     sync::SyncStatus,
@@ -53,9 +54,12 @@ fn main() {
 fn App(repo: Repo, session: Session) -> impl IntoView {
     let session = RwSignal::new(session);
     let status = RwSignal::new(SyncStatus::Idle);
+    let new_version = NewVersion(RwSignal::new(false));
     provide_context(repo);
     provide_context(session);
     provide_context(status);
+    provide_context(new_version);
+    leptos::task::spawn_local(pwa::watch_for_updates(new_version.0));
     leptos::task::spawn_local(session::resolve(repo, session));
     sync::run_while_signed_in(repo, session, status);
     view! {
