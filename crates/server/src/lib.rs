@@ -13,7 +13,7 @@ use axum::{
     Router,
     body::Body,
     extract::{FromRef, Request, State},
-    http::StatusCode,
+    http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -73,21 +73,46 @@ pub fn app(state: AppState) -> Router {
 
 /// Serves the built web client. Client routes (paths whose last segment has
 /// no extension, like /lists/…) get index.html so they survive a reload or
-/// a shared link. A missing file is a 404 rather than index.html.
+/// a shared link. A missing file is a 404 rather than index.html, so a stale
+/// asset URL can never be cached as a long-lived copy of the page.
 async fn static_files(State(app): State<AppState>, request: Request) -> Response {
     let Some(dir) = &app.static_dir else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let file = request.uri().path().rsplit('/').next().unwrap_or_default();
     let is_route = !file.contains('.');
+    let cache_control = if !is_route && is_hashed(file) {
+        // trunk names these after their contents.
+        "public, max-age=31536000, immutable"
+    } else {
+        // index.html, sw.js, the manifest and icons keep their names across
+        // builds, so the browser must revalidate them (a cheap 304). The
+        // service worker serves them from its own cache anyway.
+        "no-cache"
+    };
     let served = if is_route {
         let index = ServeFile::new(dir.join("index.html"));
         ServeDir::new(dir).fallback(index).oneshot(request).await
     } else {
         ServeDir::new(dir).oneshot(request).await
     };
-    match served {
+    let mut response = match served {
         Ok(response) => response.map(Body::new),
         Err(infallible) => match infallible {},
+    };
+    if response.status().is_success() || response.status() == StatusCode::NOT_MODIFIED {
+        response.headers_mut().insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static(cache_control),
+        );
     }
+    response
+}
+
+/// Whether a file name carries trunk's content hash, e.g.
+/// `supp-web-374097c3cc8cad86_bg.wasm`.
+fn is_hashed(file: &str) -> bool {
+    file.split(['-', '_', '.']).any(|part| {
+        part.len() == 16 && part.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    })
 }

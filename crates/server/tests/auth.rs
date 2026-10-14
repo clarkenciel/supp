@@ -287,3 +287,58 @@ async fn serves_the_web_client_with_spa_fallback() {
         StatusCode::NOT_FOUND
     );
 }
+
+#[tokio::test]
+async fn caches_hashed_assets_forever_and_revalidates_the_rest() {
+    let dir = tempfile::tempdir().unwrap();
+    let dist = dir.path().join("dist");
+    std::fs::create_dir_all(dist.join("icons")).unwrap();
+    for file in [
+        "index.html",
+        "sw.js",
+        "manifest.webmanifest",
+        "icons/icon-192.png",
+        "supp-web-0123456789abcdef.js",
+        "supp-web-0123456789abcdef_bg.wasm",
+        "style-0123456789abcdef.css",
+    ] {
+        std::fs::write(dist.join(file), file).unwrap();
+    }
+    let app = TestApp::with_static_dir(dir, dist).await;
+
+    let mut browser = Browser::default();
+    let cache_control = |r: &Response<Body>| {
+        assert_eq!(r.status(), StatusCode::OK);
+        r.headers()[header::CACHE_CONTROL]
+            .to_str()
+            .unwrap()
+            .to_string()
+    };
+    let immutable = "public, max-age=31536000, immutable";
+    for path in [
+        "/supp-web-0123456789abcdef.js",
+        "/supp-web-0123456789abcdef_bg.wasm",
+        "/style-0123456789abcdef.css",
+    ] {
+        assert_eq!(
+            cache_control(&browser.get(&app, path).await),
+            immutable,
+            "{path}"
+        );
+    }
+    let deep = format!("/lists/{}", DocId::new());
+    for path in [
+        "/",
+        "/index.html",
+        &deep,
+        "/sw.js",
+        "/manifest.webmanifest",
+        "/icons/icon-192.png",
+    ] {
+        assert_eq!(
+            cache_control(&browser.get(&app, path).await),
+            "no-cache",
+            "{path}"
+        );
+    }
+}
