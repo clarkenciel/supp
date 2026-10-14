@@ -12,6 +12,7 @@ message ClientMessage {
     Subscribe subscribe = 2;
     SyncPayload sync = 3;
     Unsubscribe unsubscribe = 4;
+    Leave leave = 5;
   }
 }
 
@@ -23,6 +24,7 @@ message ServerMessage {
     Error error = 4;
     UpgradeRequired upgrade = 5;
     SessionEnded session_ended = 6;
+    Left left = 7;
   }
 }
 
@@ -48,6 +50,16 @@ message Subscribe {
 }
 
 message Unsubscribe {
+  bytes doc_id = 1;
+}
+
+// Leave a list: it disappears from the user's lists on every device.
+// Idempotent; answered with Left.
+message Leave {
+  bytes doc_id = 1;
+}
+
+message Left {
   bytes doc_id = 1;
 }
 

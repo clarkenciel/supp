@@ -406,6 +406,16 @@ impl Accounts {
         Ok(access)
     }
 
+    /// Removes `user` from the list. The document itself is kept.
+    pub async fn leave(&self, user: UserId, doc: DocId) -> sqlx::Result<()> {
+        sqlx::query("DELETE FROM list_members WHERE doc_id = ? AND user_id = ?")
+            .bind(doc.as_bytes().as_slice())
+            .bind(user.0)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn docs_for(&self, user: UserId) -> sqlx::Result<Vec<DocId>> {
         let rows: Vec<Vec<u8>> = sqlx::query_scalar(
             "SELECT doc_id FROM list_members WHERE user_id = ? ORDER BY added_at",
@@ -715,5 +725,16 @@ mod tests {
         assert_eq!(accounts.authorize(b.id, doc).await.unwrap(), Access::Denied);
         assert_eq!(accounts.docs_for(a.id).await.unwrap(), vec![doc]);
         assert!(accounts.docs_for(b.id).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn leaving_a_list() {
+        let (_dir, accounts) = accounts().await;
+        let a = signup(&accounts, "a").await;
+        let doc = DocId::new();
+        accounts.authorize(a.id, doc).await.unwrap();
+        accounts.leave(a.id, doc).await.unwrap();
+        accounts.leave(a.id, doc).await.unwrap();
+        assert!(accounts.docs_for(a.id).await.unwrap().is_empty());
     }
 }

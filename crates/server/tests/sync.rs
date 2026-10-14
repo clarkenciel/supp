@@ -479,3 +479,33 @@ async fn ended_sessions_are_told_and_disconnected() {
 
     server.stop().await;
 }
+
+#[tokio::test]
+async fn leaving_removes_a_list_from_the_account() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = Server::start(&dir.path().join("supp.db"), 100).await;
+    let (session, _) = server.session("alice").await;
+    let id = DocId::new();
+
+    let mut ws = connect_raw(server.addr, &session).await;
+    welcome(&mut ws).await;
+    send(&mut ws, subscribe(id)).await;
+    let leave = client_message::Msg::Leave(supp_shared::proto::sync::v1::Leave {
+        doc_id: id.as_bytes().to_vec(),
+    });
+    send(&mut ws, leave).await;
+    loop {
+        match recv(&mut ws).await {
+            Some(server_message::Msg::Left(left)) => {
+                assert_eq!(left.doc_id, id.as_bytes());
+                break;
+            }
+            Some(server_message::Msg::Sync(_)) => continue,
+            other => panic!("expected left, got {other:?}"),
+        }
+    }
+
+    let mut ws = connect_raw(server.addr, &session).await;
+    assert!(welcome(&mut ws).await.is_empty());
+    server.stop().await;
+}
