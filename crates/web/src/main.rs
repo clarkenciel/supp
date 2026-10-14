@@ -1,3 +1,5 @@
+mod storage;
+
 use leptos::prelude::*;
 
 fn main() {
