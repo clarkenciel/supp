@@ -71,6 +71,9 @@ message SyncPayload {
 message Denied {
   bytes doc_id = 1;
   string reason = 2;
+  // The user left this list, perhaps on another device: drop the local copy.
+  // Otherwise it is someone else's list, and the local copy is kept.
+  bool left = 3;
 }
 
 // The session expired, was logged out, or the account was disabled. The

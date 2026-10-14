@@ -206,15 +206,17 @@ impl Storage {
         Ok(())
     }
 
-    /// Deletes a list and records a pending leave for it.
-    pub async fn delete_doc(&self, id: DocId) -> Result<()> {
+    /// Deletes a list, recording a pending leave for it if `leave`.
+    pub async fn delete_doc(&self, id: DocId, leave: bool) -> Result<()> {
         let tx = self.db.transaction(
             &[DOCS, SNAPSHOTS, CHANGES, LEFT],
             TransactionMode::ReadWrite,
         )?;
-        tx.object_store(LEFT)?
-            .put(&JsValue::TRUE, Some(&doc_key(id)))?
-            .await?;
+        if leave {
+            tx.object_store(LEFT)?
+                .put(&JsValue::TRUE, Some(&doc_key(id)))?
+                .await?;
+        }
         tx.object_store(DOCS)?.delete(doc_key(id))?.await?;
         tx.object_store(SNAPSHOTS)?.delete(doc_key(id))?.await?;
         tx.object_store(CHANGES)?.delete(chunk_range(id)?)?.await?;

@@ -125,9 +125,12 @@ pub enum LoginError {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Access {
     Member,
-    /// The document had no members, so the user became its owner.
+    /// The document had never had members, so the user became its owner.
     Claimed,
-    Denied,
+    /// Someone else's list.
+    NotMember,
+    /// The user left this list (perhaps on another device).
+    Left,
 }
 
 #[derive(Clone)]
@@ -381,23 +384,29 @@ impl Accounts {
 
     // Memberships
 
-    /// Whether `user` may sync `doc`. A document nobody belongs to yet is
-    /// claimed by the first user to sync it; UUIDv4 IDs are unguessable, so
-    /// only its creator can do that.
+    /// Whether `user` may sync `doc`. A document that has never had members
+    /// is claimed by the first user to sync it; UUIDv4 IDs are unguessable,
+    /// so only its creator can do that. Left memberships still count, so a
+    /// list someone left can't be claimed back by a stale copy.
     pub async fn authorize(&self, user: UserId, doc: DocId) -> sqlx::Result<Access> {
         let doc_bytes = doc.as_bytes().as_slice();
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let (members, is_member): (i64, bool) = sqlx::query_as(
-            "SELECT COUNT(*), COALESCE(MAX(user_id = ?), 0) FROM list_members WHERE doc_id = ?",
+        let (rows, member, left): (i64, bool, bool) = sqlx::query_as(
+            "SELECT COUNT(*), \
+             COALESCE(MAX(user_id = ?1 AND left_at IS NULL), 0), \
+             COALESCE(MAX(user_id = ?1 AND left_at IS NOT NULL), 0) \
+             FROM list_members WHERE doc_id = ?2",
         )
         .bind(user.0)
         .bind(doc_bytes)
         .fetch_one(&mut *tx)
         .await?;
-        let access = if is_member {
+        let access = if member {
             Access::Member
-        } else if members > 0 {
-            Access::Denied
+        } else if left {
+            Access::Left
+        } else if rows > 0 {
+            Access::NotMember
         } else {
             add_member(&mut tx, doc, user, "owner", now()).await?;
             Access::Claimed
@@ -406,19 +415,25 @@ impl Accounts {
         Ok(access)
     }
 
-    /// Removes `user` from the list. The document itself is kept.
+    /// Marks `user` as having left the list. The document is kept, and a
+    /// share link can bring them back.
     pub async fn leave(&self, user: UserId, doc: DocId) -> sqlx::Result<()> {
-        sqlx::query("DELETE FROM list_members WHERE doc_id = ? AND user_id = ?")
-            .bind(doc.as_bytes().as_slice())
-            .bind(user.0)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "UPDATE list_members SET left_at = ? \
+             WHERE doc_id = ? AND user_id = ? AND left_at IS NULL",
+        )
+        .bind(now())
+        .bind(doc.as_bytes().as_slice())
+        .bind(user.0)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
     pub async fn docs_for(&self, user: UserId) -> sqlx::Result<Vec<DocId>> {
         let rows: Vec<Vec<u8>> = sqlx::query_scalar(
-            "SELECT doc_id FROM list_members WHERE user_id = ? ORDER BY added_at",
+            "SELECT doc_id FROM list_members WHERE user_id = ? AND left_at IS NULL \
+             ORDER BY added_at",
         )
         .bind(user.0)
         .fetch_all(&self.pool)
@@ -486,8 +501,10 @@ async fn add_member(
     role: &str,
     now: i64,
 ) -> sqlx::Result<()> {
+    // Rejoining through a share link revives a left membership.
     sqlx::query(
-        "INSERT OR IGNORE INTO list_members (doc_id, user_id, role, added_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO list_members (doc_id, user_id, role, added_at) VALUES (?, ?, ?, ?) \
+         ON CONFLICT (doc_id, user_id) DO UPDATE SET left_at = NULL",
     )
     .bind(doc.as_bytes().as_slice())
     .bind(user.0)
@@ -655,7 +672,7 @@ mod tests {
         let existing = signup(&accounts, "existing").await;
         assert_eq!(
             accounts.authorize(existing.id, doc).await.unwrap(),
-            Access::Denied
+            Access::NotMember
         );
         let login = accounts
             .login(&identity("existing"), Some(&token))
@@ -722,7 +739,10 @@ mod tests {
             Access::Claimed
         );
         assert_eq!(accounts.authorize(a.id, doc).await.unwrap(), Access::Member);
-        assert_eq!(accounts.authorize(b.id, doc).await.unwrap(), Access::Denied);
+        assert_eq!(
+            accounts.authorize(b.id, doc).await.unwrap(),
+            Access::NotMember
+        );
         assert_eq!(accounts.docs_for(a.id).await.unwrap(), vec![doc]);
         assert!(accounts.docs_for(b.id).await.unwrap().is_empty());
     }
@@ -736,5 +756,22 @@ mod tests {
         accounts.leave(a.id, doc).await.unwrap();
         accounts.leave(a.id, doc).await.unwrap();
         assert!(accounts.docs_for(a.id).await.unwrap().is_empty());
+
+        // A stale copy on another device can't claim it back...
+        assert_eq!(accounts.authorize(a.id, doc).await.unwrap(), Access::Left);
+        let b = signup(&accounts, "b").await;
+        assert_eq!(
+            accounts.authorize(b.id, doc).await.unwrap(),
+            Access::NotMember
+        );
+
+        // ...but a share link brings the user back.
+        let share = NewInvite {
+            created_by: Some(b.id),
+            ..invite(Some(doc), 1)
+        };
+        let (_, token) = accounts.create_invite(share).await.unwrap();
+        accounts.login(&identity("a"), Some(&token)).await.unwrap();
+        assert_eq!(accounts.authorize(a.id, doc).await.unwrap(), Access::Member);
     }
 }

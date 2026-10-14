@@ -241,12 +241,21 @@ impl Repo {
     /// A write already in flight may land after the delete; its chunk is
     /// orphaned (no `docs` entry) and never loaded.
     pub fn delete_list(&self, id: DocId) {
+        self.remove(id, true);
+        self.notify(LocalEvent::Deleted(id));
+    }
+
+    /// Drops the local copy of a list the user left on another device.
+    pub fn forget(&self, id: DocId) {
+        self.remove(id, false);
+    }
+
+    fn remove(&self, id: DocId, leave: bool) {
         let inner = self.inner.get_value();
         inner.docs.borrow_mut().remove(&id);
         self.lists.update(|l| l.retain(|&d| d != id));
-        self.notify(LocalEvent::Deleted(id));
         spawn_local(async move {
-            if let Err(err) = inner.storage.delete_doc(id).await {
+            if let Err(err) = inner.storage.delete_doc(id, leave).await {
                 logging::error!("deleting {id}: {err}");
             }
         });
