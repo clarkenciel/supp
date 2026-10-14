@@ -102,7 +102,7 @@ message SyncPayload { bytes doc_id = 1; bytes data = 2; } // data = opaque autom
 ### SQLite schema
 
 ```sql
-users(id, google_sub UNIQUE, email, name, invite_id, disabled_at)
+users(id, subject UNIQUE, email, name, invite_id, created_at, disabled_at)
 sessions(token_hash, user_id, expires_at)
 invites(id, token_hash UNIQUE,
         doc_id NULL,       -- NULL: account-only invite; set: share link for that list
@@ -130,13 +130,25 @@ Caddy for TLS (service workers require a secure context).
 With no account, everything works locally in IndexedDB and no WebSocket is
 opened. Sharing prompts sign-in.
 
+### Identity providers
+
+Auth routes depend only on an `IdentityProvider` trait: `begin` returns where
+to send the browser plus opaque provider state (kept in an encrypted cookie
+until the callback), and `complete` turns the callback into a verified
+identity. The routes own CSRF `state` checking. Users are keyed on a
+provider-namespaced subject (`google:<sub>`), never on email.
+
+- **Google** (production): OIDC authorization code flow with PKCE.
+- **Dev** (`--auth dev`): a form at `/auth/dev` that signs anyone in as
+  `dev:<name>`. For local development and tests only.
+
 ### Login (server-side authorization code flow + PKCE)
 
 1. `GET /auth/login` stores state, nonce and PKCE verifier in a short-lived
    signed cookie and redirects to Google.
 2. `GET /auth/callback` exchanges the code and verifies the ID token (issuer,
    audience, expiry, nonce, signature).
-3. Users are keyed on `sub`, never email.
+3. Users are keyed on the provider-namespaced subject, never email.
 4. The server issues its own session: an `HttpOnly; Secure; SameSite=Lax`
    cookie (`Lax` because the callback is a top-level redirect from Google).
 5. Google tokens are discarded; Google is used only to prove identity.

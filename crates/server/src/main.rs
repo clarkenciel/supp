@@ -1,7 +1,11 @@
 use std::{io::stdout, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
-use clap::{Parser, Subcommand};
-use supp_server::{AppState, Docs, Store, admin, app, docs::DEFAULT_COMPACT_AFTER};
+use clap::{Parser, Subcommand, ValueEnum};
+use supp_server::{
+    AppState, Docs, Store, admin, app,
+    auth::{AuthConfig, DevProvider, IdentityProvider},
+    docs::DEFAULT_COMPACT_AFTER,
+};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -20,12 +24,24 @@ enum Command {
     Serve {
         #[arg(long, env = "SUPP_LISTEN", default_value = "127.0.0.1:3000")]
         listen: SocketAddr,
+        /// Public base URL (used for OAuth redirects and invite links).
+        #[arg(long, env = "SUPP_PUBLIC_URL", default_value = "http://127.0.0.1:3000")]
+        public_url: String,
+        /// Identity provider.
+        #[arg(long, env = "SUPP_AUTH", value_enum)]
+        auth: AuthKind,
     },
     /// Manage invites and users.
     Admin {
         #[command(subcommand)]
         command: AdminCommand,
     },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum AuthKind {
+    /// Anyone signs in as any name. Local development only.
+    Dev,
 }
 
 #[derive(Subcommand)]
@@ -76,11 +92,22 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let store = Store::open(&cli.db).await?;
     match cli.command {
-        Command::Serve { listen } => {
+        Command::Serve {
+            listen,
+            public_url,
+            auth,
+        } => {
+            let provider: Arc<dyn IdentityProvider> = match auth {
+                AuthKind::Dev => {
+                    tracing::warn!("DEV AUTH ENABLED: anyone can sign in as anyone");
+                    Arc::new(DevProvider)
+                }
+            };
             let docs = Arc::new(Docs::new(store.clone(), DEFAULT_COMPACT_AFTER));
+            let state = AppState::new(&store, docs, AuthConfig::new(provider, &public_url)).await?;
             let listener = tokio::net::TcpListener::bind(listen).await?;
-            tracing::info!("listening on {listen}");
-            axum::serve(listener, app(AppState { docs }))
+            tracing::info!("listening on {listen}, public URL {public_url}");
+            axum::serve(listener, app(state))
                 .with_graceful_shutdown(async {
                     let _ = tokio::signal::ctrl_c().await;
                 })
