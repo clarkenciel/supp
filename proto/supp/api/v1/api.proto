@@ -1,0 +1,11 @@
+// HTTP API bodies (application/x-protobuf). Same evolution rules as sync.proto.
+syntax = "proto3";
+
+package supp.api.v1;
+
+// GET /api/me: the signed-in user.
+message Me {
+  int64 user_id = 1;
+  string email = 2;
+  string name = 3;
+}

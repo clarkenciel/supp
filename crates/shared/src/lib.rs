@@ -8,6 +8,11 @@ pub use doc_id::DocId;
 
 /// Generated protobuf types.
 pub mod proto {
+    pub mod api {
+        pub mod v1 {
+            include!(concat!(env!("OUT_DIR"), "/supp.api.v1.rs"));
+        }
+    }
     pub mod sync {
         pub mod v1 {
             include!(concat!(env!("OUT_DIR"), "/supp.sync.v1.rs"));

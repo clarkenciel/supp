@@ -9,7 +9,10 @@ use automerge::{
 use autosurgeon::{hydrate, reconcile};
 use futures_util::{SinkExt, StreamExt};
 use prost::Message as _;
-use supp_server::{AppState, Docs, Store, app};
+use supp_server::{
+    AppState, Docs, Store, app,
+    auth::{AuthConfig, DevProvider},
+};
 use supp_shared::{
     DocId, PROTOCOL_VERSION,
     proto::sync::v1::{
@@ -35,9 +38,11 @@ impl Server {
         let docs = Arc::new(Docs::new(store.clone(), compact_after));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
+        let auth = AuthConfig::new(Arc::new(DevProvider), &format!("http://{addr}"));
+        let state = AppState::new(&store, docs, auth).await.unwrap();
         let (shutdown, rx) = oneshot::channel();
         let task = tokio::spawn(async move {
-            axum::serve(listener, app(AppState { docs }))
+            axum::serve(listener, app(state))
                 .with_graceful_shutdown(async {
                     let _ = rx.await;
                 })
