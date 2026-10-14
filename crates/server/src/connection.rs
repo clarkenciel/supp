@@ -17,8 +17,8 @@ use prost::Message as _;
 use supp_shared::{
     DocId, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION,
     proto::sync::v1::{
-        ClientMessage, Denied, Error, ServerMessage, SessionEnded, SyncPayload, UpgradeRequired,
-        Welcome, client_message, server_message,
+        ClientMessage, Denied, Error, Left, ServerMessage, SessionEnded, SyncPayload,
+        UpgradeRequired, Welcome, client_message, server_message,
     },
 };
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -207,6 +207,21 @@ impl Connection {
                     self.subs.remove(&id);
                 }
                 vec![]
+            }
+            Some(Msg::Leave(leave)) => {
+                let Ok(id) = DocId::from_bytes(&leave.doc_id) else {
+                    return Reply::Send(vec![error("invalid doc id".into())]);
+                };
+                self.subs.remove(&id);
+                match self.app.accounts.leave(self.user.id, id).await {
+                    Ok(()) => vec![server_message::Msg::Left(Left {
+                        doc_id: id.as_bytes().to_vec(),
+                    })],
+                    Err(err) => {
+                        tracing::error!("leaving {id}: {err}");
+                        vec![error("failed to leave list".into())]
+                    }
+                }
             }
             Some(Msg::Hello(_)) => vec![error("unexpected hello".into())],
             // Unknown variant from a newer client.
