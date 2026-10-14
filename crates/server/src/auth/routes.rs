@@ -161,8 +161,10 @@ pub async fn callback(
         .secure(app.auth.secure_cookies)
         .same_site(SameSite::Lax)
         .max_age(time_secs(SESSION_TTL.as_secs() as i64));
+    // `joined` tells the client this list is wanted again, in case it was
+    // deleted on this device and the leave hasn't reached the server yet.
     let to = match login.joined {
-        Some(doc) => format!("/lists/{doc}"),
+        Some(doc) => format!("/lists/{doc}?joined=1"),
         None => "/".to_string(),
     };
     (jar, session_jar.add(session), Redirect::to(&to)).into_response()

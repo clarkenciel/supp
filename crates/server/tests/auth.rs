@@ -193,7 +193,7 @@ async fn share_link_lands_on_the_list() {
     let response = browser
         .sign_in(&app, &format!("/join/{}", token.as_str()), "bob")
         .await;
-    assert_eq!(location(&response), format!("/lists/{doc}"));
+    assert_eq!(location(&response), format!("/lists/{doc}?joined=1"));
 }
 
 #[tokio::test]
@@ -445,7 +445,7 @@ async fn members_share_lists_with_new_users() {
     // Someone with no account signs up through it and lands on the list.
     let mut guest = Browser::default();
     let response = guest.sign_in(&app, &link, "guest").await;
-    assert_eq!(location(&response), format!("/lists/{doc}"));
+    assert_eq!(location(&response), format!("/lists/{doc}?joined=1"));
     let guest_id = UserId(guest.me(&app).await.unwrap().user_id);
     assert_eq!(app.accounts.docs_for(guest_id).await.unwrap(), vec![doc]);
 
@@ -535,7 +535,27 @@ async fn existing_users_join_through_share_links() {
     // The friend's other device: an existing account signing in via the link.
     let mut laptop = Browser::default();
     let response = laptop.sign_in(&app, &link, "friend").await;
-    assert_eq!(location(&response), format!("/lists/{doc}"));
+    assert_eq!(location(&response), format!("/lists/{doc}?joined=1"));
+    assert_eq!(app.accounts.docs_for(friend_id).await.unwrap(), vec![doc]);
+}
+
+#[tokio::test]
+async fn rejoining_a_left_list_revives_the_membership() {
+    let app = TestApp::new().await;
+    let (mut owner, owner_id) = app.user("owner").await;
+    let (mut friend, friend_id) = app.user("friend").await;
+    let doc = DocId::new();
+    app.accounts.authorize(owner_id, doc).await.unwrap();
+    let link = owner.share(&app, doc, CreateShareLink::default()).await;
+    friend.sign_in(&app, &link, "friend").await;
+    app.accounts.leave(friend_id, doc).await.unwrap();
+    assert!(app.accounts.docs_for(friend_id).await.unwrap().is_empty());
+
+    // The landing URL says the list was joined, so a device that deleted
+    // it offline knows to drop its pending leave instead of sending it.
+    let link = owner.share(&app, doc, CreateShareLink::default()).await;
+    let response = friend.sign_in(&app, &link, "friend").await;
+    assert_eq!(location(&response), format!("/lists/{doc}?joined=1"));
     assert_eq!(app.accounts.docs_for(friend_id).await.unwrap(), vec![doc]);
 }
 
@@ -626,7 +646,7 @@ async fn share_link_limits_are_enforced() {
     assert!((info.expires_at - now() - 3600).abs() < 5);
     for name in ["a", "b"] {
         let response = Browser::default().sign_in(&app, &link, name).await;
-        assert_eq!(location(&response), format!("/lists/{doc}"));
+        assert_eq!(location(&response), format!("/lists/{doc}?joined=1"));
     }
     let response = Browser::default().sign_in(&app, &link, "c").await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);

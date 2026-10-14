@@ -31,6 +31,12 @@ fn main() {
     wasm_bindgen_futures::spawn_local(async {
         match Repo::open().await {
             Ok(repo) => {
+                // Before the sync loop exists, so it can't send the leave.
+                if let Some(id) = sync::take_joined_list()
+                    && let Err(err) = repo.forget_left(id).await
+                {
+                    leptos::logging::error!("dropping the pending leave of {id}: {err}");
+                }
                 let stored = repo.account().await.ok().flatten();
                 leptos::mount::mount_to_body(move || {
                     view! { <App repo session=Session::from_stored(stored) /> }

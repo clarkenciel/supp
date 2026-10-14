@@ -315,6 +315,33 @@ async fn send(sink: &mut Sink, msg: client_message::Msg) -> SendResult {
     sink.send(Message::Bytes(bytes)).await.map_err(|_| ())
 }
 
+/// The list a share link has just joined, if this page is where its sign-in
+/// landed (`/lists/<id>?joined=1`). The marker is removed from the address
+/// bar and history, so a reload or going back can't repeat it.
+///
+/// The list may have been deleted here while offline, with its `Leave`
+/// still pending; the caller drops that leave before the sync loop starts,
+/// or the next `Welcome` would send it and undo the join.
+pub fn take_joined_list() -> Option<DocId> {
+    let window = window();
+    let location = window.location();
+    let search = location.search().ok()?;
+    if !web_sys::UrlSearchParams::new_with_str(&search)
+        .ok()?
+        .has("joined")
+    {
+        return None;
+    }
+    let path = location.pathname().ok()?;
+    let id = path.strip_prefix("/lists/")?.parse().ok()?;
+    let _ = window.history().ok()?.replace_state_with_url(
+        &wasm_bindgen::JsValue::NULL,
+        "",
+        Some(&path),
+    );
+    Some(id)
+}
+
 fn sync_url() -> String {
     let location = window().location();
     let scheme = match location.protocol().as_deref() {
