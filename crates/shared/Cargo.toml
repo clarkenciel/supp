@@ -14,3 +14,9 @@ uuid.workspace = true
 [build-dependencies]
 prost-build.workspace = true
 protox.workspace = true
+
+# Browser builds: automerge's RNG (actor IDs) and uuid both need to be pointed
+# at crypto.getRandomValues explicitly on wasm32-unknown-unknown.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }
+uuid = { workspace = true, features = ["js"] }
