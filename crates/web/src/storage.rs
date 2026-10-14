@@ -11,6 +11,7 @@ use js_sys::{Array, Uint8Array};
 use prost::Message as _;
 use supp_shared::{DocId, proto::api::v1::Me};
 use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen_futures::JsFuture;
 
 const DB_NAME: &str = "supp";
 /// v1: docs, snapshots, changes. v2: meta. v3: left.
@@ -31,6 +32,33 @@ const META: &str = "meta";
 /// META key: the account (protobuf `Me`) this device's lists belong to.
 /// Absent while the device has only been used anonymously.
 const ACCOUNT: &str = "account";
+
+/// Asks the browser not to evict this origin's data under storage pressure,
+/// which it otherwise may for sites that aren't installed. Best effort:
+/// browsers decide by their own heuristics (Firefox asks the user).
+pub async fn request_persistence() {
+    let navigator = leptos::prelude::window().navigator();
+    // Missing outside secure contexts.
+    if !js_sys::Reflect::has(&navigator, &JsValue::from_str("storage")).unwrap_or(false) {
+        return;
+    }
+    let storage = navigator.storage();
+    let ask = async {
+        if let Ok(true) = JsFuture::from(storage.persisted()?)
+            .await
+            .map(|v| v.is_truthy())
+        {
+            return Ok(true);
+        }
+        JsFuture::from(storage.persist()?)
+            .await
+            .map(|v| v.is_truthy())
+    };
+    match ask.await {
+        Ok(granted) => leptos::logging::log!("persistent storage: {granted}"),
+        Err(err) => leptos::logging::warn!("requesting persistent storage: {err:?}"),
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
