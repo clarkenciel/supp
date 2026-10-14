@@ -21,6 +21,9 @@ use wasm_bindgen::JsValue;
 
 use crate::storage::{Storage, StorageError};
 
+/// Called with the ID of every locally edited or created list.
+pub type ChangeListener = Rc<dyn Fn(DocId)>;
+
 /// Change chunks a document may accumulate before it is compacted.
 const COMPACT_AFTER: usize = 50;
 
@@ -40,7 +43,7 @@ struct Inner {
     storage: Storage,
     docs: RefCell<HashMap<DocId, OpenDoc>>,
     /// Told about every local edit, so it can be synced.
-    on_change: RefCell<Option<Rc<dyn Fn(DocId)>>>,
+    on_change: RefCell<Option<ChangeListener>>,
 }
 
 struct OpenDoc {
@@ -138,7 +141,7 @@ impl Repo {
         self.lists.get_untracked()
     }
 
-    pub fn set_change_listener(&self, listener: Option<Rc<dyn Fn(DocId)>>) {
+    pub fn set_change_listener(&self, listener: Option<ChangeListener>) {
         *self.inner.get_value().on_change.borrow_mut() = listener;
     }
 

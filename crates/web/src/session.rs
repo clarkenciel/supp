@@ -8,7 +8,7 @@ use leptos::{logging, prelude::*, task::spawn_local};
 use prost::Message as _;
 use supp_shared::proto::api::v1::Me;
 
-use crate::repo::Repo;
+use crate::{repo::Repo, sync::SyncStatus};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Session {
@@ -97,7 +97,15 @@ pub async fn sign_out(repo: Repo) -> Result<(), String> {
 pub fn AccountBar() -> impl IntoView {
     let repo = expect_context::<Repo>();
     let session = expect_context::<RwSignal<Session>>();
+    let status = expect_context::<RwSignal<SyncStatus>>();
     let (problem, set_problem) = signal(None::<String>);
+    let status_text = move || match status.get() {
+        SyncStatus::Idle => "",
+        SyncStatus::Connecting => "Connecting…",
+        SyncStatus::Online => "Synced",
+        SyncStatus::Offline => "Offline: changes are saved on this device",
+        SyncStatus::UpgradeRequired => "",
+    };
 
     let do_sign_out = move |_| {
         spawn_local(async move {
@@ -137,6 +145,9 @@ pub fn AccountBar() -> impl IntoView {
                 }
                 .into_any(),
                 Session::SignedIn(me) => view! {
+                    <span class="sync-status" data-status=move || format!("{:?}", status.get())>
+                        {status_text}
+                    </span>
                     <span class="who">{me.name}</span>
                     <button class="link" on:click=do_sign_out>"Sign out"</button>
                 }
@@ -159,6 +170,17 @@ pub fn AccountBar() -> impl IntoView {
                     <button class="danger" on:click=erase(current)>"Erase them"</button>
                 }
                 .into_any(),
+            }}
+            {move || {
+                (status.get() == SyncStatus::UpgradeRequired)
+                    .then(|| {
+                        view! {
+                            <span class="banner">"A new version of the app is available."</span>
+                            <button on:click=|_| {
+                                let _ = window().location().reload();
+                            }>"Reload"</button>
+                        }
+                    })
             }}
             {move || problem.get().map(|p| view! { <span class="banner error">{p}</span> })}
         </nav>
