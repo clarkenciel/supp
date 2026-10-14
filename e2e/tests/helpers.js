@@ -59,6 +59,16 @@ async function addItem(page, text) {
   await expect(items(page).last()).toHaveValue(text);
 }
 
+/**
+ * Cuts the network. setOffline alone doesn't reach the service worker's own
+ * fetches, so those are aborted by routing (which needs
+ * PW_EXPERIMENTAL_SERVICE_WORKER_NETWORK_EVENTS, set in playwright.config.js).
+ */
+async function goOffline(context) {
+  await context.setOffline(true);
+  await context.route('**', (route) => route.abort('internetdisconnected'));
+}
+
 module.exports = {
-  admin, invite, userId, uniqueName, signIn, items, expectItems, createList, addItem,
+  admin, invite, userId, uniqueName, signIn, items, expectItems, createList, addItem, goOffline,
 };
