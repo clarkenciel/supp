@@ -1,15 +1,20 @@
-//! `supp admin …`: invite and user management, run over SSH on the server
-//! box. Writes go straight to SQLite (WAL permits this while the server
-//! runs), so there is no admin HTTP surface to secure.
+//! `supp admin …`: invite and user management and backups, run over SSH on
+//! the server box. Writes go straight to SQLite (WAL permits this while the
+//! server runs), so there is no admin HTTP surface to secure.
 
 use std::{
+    ffi::OsString,
     io::Write,
+    path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, bail};
 
-use crate::accounts::{Accounts, InviteId, NewInvite, UserId};
+use crate::{
+    Store,
+    accounts::{Accounts, InviteId, NewInvite, UserId},
+};
 
 /// Parses durations like `30m`, `12h`, `7d`.
 pub fn parse_duration(s: &str) -> anyhow::Result<Duration> {
@@ -119,6 +124,38 @@ pub async fn user_disable(
     }
 }
 
+/// Copies the database to `path`, refusing to replace an existing file
+/// unless `force`. The copy is written next to `path` and renamed into
+/// place, so a failed backup never clobbers the previous one.
+pub async fn backup(
+    store: &Store,
+    path: &Path,
+    force: bool,
+    out: &mut impl Write,
+) -> anyhow::Result<()> {
+    if !force && path.try_exists()? {
+        bail!(
+            "{} already exists (use --force to replace it)",
+            path.display()
+        );
+    }
+    let mut partial = OsString::from(path.as_os_str());
+    partial.push(".partial");
+    let partial = Path::new(&partial);
+    // Left behind by an interrupted run; VACUUM INTO won't write over it.
+    if partial.try_exists()? {
+        std::fs::remove_file(partial)?;
+    }
+    store
+        .backup(partial)
+        .await
+        .with_context(|| format!("writing {}", partial.display()))?;
+    std::fs::rename(partial, path)
+        .with_context(|| format!("moving the backup to {}", path.display()))?;
+    writeln!(out, "Backed up to {}.", path.display())?;
+    Ok(())
+}
+
 /// Rounds up, so a fresh 7-day invite reads "7d" rather than "6d".
 fn human(secs: i64) -> String {
     let ceil = |unit: i64| (secs + unit - 1) / unit;
@@ -139,10 +176,8 @@ fn unix_now() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        Store,
-        accounts::{Identity, Token},
-    };
+    use crate::accounts::{Identity, Token};
+    use supp_shared::DocId;
 
     #[test]
     fn durations() {
@@ -230,5 +265,70 @@ mod tests {
                 .is_err()
         );
         assert!(invite_revoke(&accounts, 99, &mut Vec::new()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn backups_are_complete_and_never_overwrite_by_accident() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("supp.db")).await.unwrap();
+        let accounts = store.accounts();
+        let ttl = Duration::from_secs(3600);
+        invite_create(
+            &accounts,
+            "https://x.test",
+            ttl,
+            1,
+            "first".into(),
+            &mut Vec::new(),
+        )
+        .await
+        .unwrap();
+        let doc = DocId::new();
+        store.append(doc, &list_doc_bytes()).await.unwrap();
+
+        // Taken while the source is open, as the server would have it.
+        let path = dir.path().join("backup.db");
+        let mut out = Vec::new();
+        backup(&store, &path, false, &mut out).await.unwrap();
+        assert!(String::from_utf8(out).unwrap().starts_with("Backed up to "));
+
+        let copy = Store::open(&path).await.unwrap();
+        let invites = copy.accounts().list_invites().await.unwrap();
+        assert_eq!(invites.len(), 1);
+        assert_eq!(invites[0].note, "first");
+        let loaded = copy.load(doc).await.unwrap().expect("document in backup");
+        assert_eq!(
+            loaded.doc.get_heads(),
+            store.load(doc).await.unwrap().unwrap().doc.get_heads()
+        );
+        copy.close().await;
+
+        // An existing file is kept unless forced.
+        invite_create(
+            &accounts,
+            "https://x.test",
+            ttl,
+            1,
+            "second".into(),
+            &mut Vec::new(),
+        )
+        .await
+        .unwrap();
+        let err = backup(&store, &path, false, &mut Vec::new())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("--force"), "{err}");
+        backup(&store, &path, true, &mut Vec::new()).await.unwrap();
+        let copy = Store::open(&path).await.unwrap();
+        assert_eq!(copy.accounts().list_invites().await.unwrap().len(), 2);
+        assert!(!dir.path().join("backup.db.partial").exists());
+    }
+
+    /// A small Automerge document, saved.
+    fn list_doc_bytes() -> Vec<u8> {
+        use automerge::{ROOT, transaction::Transactable};
+        let mut doc = automerge::AutoCommit::new();
+        doc.put(ROOT, "title", "Groceries").unwrap();
+        doc.save()
     }
 }

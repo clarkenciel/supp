@@ -64,6 +64,20 @@ impl Store {
             .map_err(|_| anyhow::anyhow!("server key {name} has the wrong length"))
     }
 
+    /// Writes a consistent copy of the whole database to `path`, which must
+    /// not exist. `VACUUM INTO` reads one snapshot of the database, so it is
+    /// safe while the server writes (WAL), and the copy is compact.
+    pub async fn backup(&self, path: &Path) -> anyhow::Result<()> {
+        let path = path
+            .to_str()
+            .context("backup path must be valid UTF-8 for SQLite")?;
+        sqlx::query("VACUUM INTO ?")
+            .bind(path)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn close(&self) {
         self.pool.close().await;
     }
