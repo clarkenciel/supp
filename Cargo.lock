@@ -3976,6 +3976,7 @@ dependencies = [
  "js-sys",
  "leptos",
  "leptos_router",
+ "prost",
  "supp-shared",
  "thiserror 2.0.21",
  "uuid",

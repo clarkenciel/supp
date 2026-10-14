@@ -8,11 +8,13 @@
 use automerge::AutoCommit;
 use idb::{Database, DatabaseEvent, Factory, KeyRange, ObjectStoreParams, Query, TransactionMode};
 use js_sys::{Array, Uint8Array};
-use supp_shared::DocId;
+use prost::Message as _;
+use supp_shared::{DocId, proto::api::v1::Me};
 use wasm_bindgen::{JsCast, JsValue};
 
 const DB_NAME: &str = "supp";
-const DB_VERSION: u32 = 1;
+/// v1: docs, snapshots, changes. v2: meta.
+const DB_VERSION: u32 = 2;
 
 /// doc id → creation time (ms since epoch). The set of local lists.
 const DOCS: &str = "docs";
@@ -20,6 +22,11 @@ const DOCS: &str = "docs";
 const SNAPSHOTS: &str = "snapshots";
 /// [doc id, chunk id] → incremental save output.
 const CHANGES: &str = "changes";
+/// Small device-level records, keyed by name.
+const META: &str = "meta";
+/// META key: the account (protobuf `Me`) this device's lists belong to.
+/// Absent while the device has only been used anonymously.
+const ACCOUNT: &str = "account";
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
@@ -50,7 +57,9 @@ impl Storage {
         request.on_upgrade_needed(|event| {
             let db = event.database().expect("upgrade event has a database");
             let existing = db.store_names();
-            for name in [DOCS, SNAPSHOTS, CHANGES] {
+            // Every version only adds stores, so creating whichever are
+            // missing upgrades from any earlier version.
+            for name in [DOCS, SNAPSHOTS, CHANGES, META] {
                 if !existing.iter().any(|n| n == name) {
                     db.create_object_store(name, ObjectStoreParams::new())
                         .expect("create object store");
@@ -134,6 +143,41 @@ impl Storage {
         let changes = tx.object_store(CHANGES)?;
         for chunk in chunks {
             changes.delete(Query::Key(chunk.clone()))?.await?;
+        }
+        tx.commit()?.await?;
+        Ok(())
+    }
+
+    pub async fn account(&self) -> Result<Option<Me>> {
+        let tx = self.db.transaction(&[META], TransactionMode::ReadOnly)?;
+        let value = tx
+            .object_store(META)?
+            .get(JsValue::from_str(ACCOUNT))?
+            .await?;
+        tx.await?;
+        value
+            .map(|v| {
+                Me::decode(bytes_of(&v)?.as_slice()).map_err(|_| StorageError::Corrupt("account"))
+            })
+            .transpose()
+    }
+
+    pub async fn set_account(&self, me: &Me) -> Result<()> {
+        let tx = self.db.transaction(&[META], TransactionMode::ReadWrite)?;
+        let bytes = Uint8Array::from(me.encode_to_vec().as_slice());
+        tx.object_store(META)?
+            .put(&bytes.into(), Some(&JsValue::from_str(ACCOUNT)))?
+            .await?;
+        tx.commit()?.await?;
+        Ok(())
+    }
+
+    /// Erases everything: every list and the account record.
+    pub async fn clear(&self) -> Result<()> {
+        let stores = [DOCS, SNAPSHOTS, CHANGES, META];
+        let tx = self.db.transaction(&stores, TransactionMode::ReadWrite)?;
+        for name in stores {
+            tx.object_store(name)?.clear()?.await?;
         }
         tx.commit()?.await?;
         Ok(())
