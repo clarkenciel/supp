@@ -19,6 +19,11 @@ use crate::storage::{Storage, StorageError};
 const COMPACT_AFTER: usize = 50;
 
 /// Cheap handle to the shared repo; `Copy`, so it can live in context.
+///
+/// Create it outside any reactive owner (before mounting) so it lives for the
+/// whole app. Per-document views are `ArcRwSignal`s for the same reason: an
+/// arena signal would belong to whichever component happened to open or
+/// create the document, and die when that component unmounts.
 #[derive(Clone, Copy)]
 pub struct Repo {
     inner: StoredValue<Rc<Inner>, LocalStorage>,
@@ -32,7 +37,7 @@ struct Inner {
 
 struct OpenDoc {
     doc: AutoCommit,
-    view: RwSignal<ListDoc>,
+    view: ArcRwSignal<ListDoc>,
     /// Heads of what is in IndexedDB; the next write saves everything after.
     persisted_heads: Vec<ChangeHash>,
     /// Chunks stored since the last snapshot.
@@ -70,7 +75,7 @@ impl Repo {
     pub fn list(&self, id: DocId) -> Option<Signal<ListDoc>> {
         let inner = self.inner.get_value();
         let docs = inner.docs.borrow();
-        docs.get(&id).map(|d| d.view.into())
+        docs.get(&id).map(|d| d.view.clone().into())
     }
 
     pub fn create_list(&self, title: String) -> DocId {
@@ -139,7 +144,7 @@ impl OpenDoc {
         persisted_heads: Vec<ChangeHash>,
     ) -> Self {
         Self {
-            view: RwSignal::new(hydrate_or_default(&doc, id)),
+            view: ArcRwSignal::new(hydrate_or_default(&doc, id)),
             persisted_heads,
             doc,
             chunks,
