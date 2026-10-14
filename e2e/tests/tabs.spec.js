@@ -2,8 +2,16 @@
 // over the same IndexedDB. Pages in one browser context are tabs.
 const { test, expect } = require('@playwright/test');
 const {
-  items, createList, goOffline,
+  items, expectItems, createList, addItem, goOffline,
 } = require('./helpers');
+
+const lists = (page) => page.locator('ul.lists li');
+
+/** Undoes goOffline. */
+async function goOnline(context) {
+  await context.unroute('**');
+  await context.setOffline(false);
+}
 
 /** Counts the records in one of the app's IndexedDB stores. */
 function stored(page, store) {
@@ -46,6 +54,43 @@ async function addUntilCompacted(page, prefix) {
   throw new Error('the list was never compacted');
 }
 
+test('edits in one tab show in the other at once, offline', async ({ context }) => {
+  const a = await context.newPage();
+  await createList(a, 'Shared');
+  await addItem(a, 'milk');
+  const b = await context.newPage();
+  await b.goto(a.url());
+  await expectItems(b, ['milk']);
+  await goOffline(context);
+
+  await addItem(a, 'eggs');
+  await expectItems(b, ['milk', 'eggs']);
+  await b.getByLabel('Done').first().check();
+  await expect(a.getByLabel('Done').first()).toBeChecked();
+  await b.getByLabel('List title').fill('Renamed');
+  await b.getByLabel('List title').press('Enter');
+  await expect(a.getByLabel('List title')).toHaveValue('Renamed');
+});
+
+test('lists created or deleted in one tab come and go in the other', async ({ context }) => {
+  const a = await context.newPage();
+  await a.goto('/');
+  const b = await context.newPage();
+  await b.goto('/');
+  await goOffline(context);
+
+  await a.getByLabel('New list title').fill('Errands');
+  await a.getByRole('button', { name: 'Create' }).click();
+  await expect(lists(b)).toHaveText([/Errands\s*0\/0/]);
+  await addItem(a, 'post office');
+  await expect(lists(b)).toHaveText([/Errands\s*0\/1/]);
+
+  a.once('dialog', (dialog) => dialog.accept());
+  await a.getByRole('button', { name: 'Delete list' }).click();
+  await expect(lists(a)).toHaveCount(0);
+  await expect(lists(b)).toHaveCount(0);
+});
+
 test('tabs editing one list keep all their changes through compaction', async ({ context }) => {
   test.setTimeout(120_000);
   const a = await context.newPage();
@@ -62,8 +107,7 @@ test('tabs editing one list keep all their changes through compaction', async ({
 
   // Nothing either tab wrote is lost. (Back online only so the reload
   // doesn't depend on the service worker having taken control.)
-  await context.unroute('**');
-  await context.setOffline(false);
+  await goOnline(context);
   await b.reload();
   await expect(b.getByLabel('List title')).toHaveValue('Big');
   expect((await texts(b)).sort()).toEqual([...fromA, ...fromB].sort());
