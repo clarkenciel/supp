@@ -8,7 +8,11 @@ use leptos::{logging, prelude::*, task::spawn_local};
 use prost::Message as _;
 use supp_shared::proto::api::v1::Me;
 
-use crate::{repo::Repo, sync::SyncStatus};
+use crate::{
+    pwa::{self, NewVersion},
+    repo::Repo,
+    sync::SyncStatus,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Session {
@@ -98,7 +102,9 @@ pub fn AccountBar() -> impl IntoView {
     let repo = expect_context::<Repo>();
     let session = expect_context::<RwSignal<Session>>();
     let status = expect_context::<RwSignal<SyncStatus>>();
+    let new_version = expect_context::<NewVersion>().0;
     let (problem, set_problem) = signal(None::<String>);
+    let (updating, set_updating) = signal(false);
     let status_text = move || match status.get() {
         SyncStatus::Idle => "",
         SyncStatus::Connecting => "Connecting…",
@@ -171,14 +177,22 @@ pub fn AccountBar() -> impl IntoView {
                 }
                 .into_any(),
             }}
+            // Offered when a new version has installed, or when the server
+            // refuses this one.
             {move || {
-                (status.get() == SyncStatus::UpgradeRequired)
+                (new_version.get() || status.get() == SyncStatus::UpgradeRequired)
                     .then(|| {
                         view! {
                             <span class="banner">"A new version of the app is available."</span>
-                            <button on:click=|_| {
-                                let _ = window().location().reload();
-                            }>"Reload"</button>
+                            <button
+                                disabled=updating
+                                on:click=move |_| {
+                                    set_updating.set(true);
+                                    spawn_local(pwa::update_and_reload());
+                                }
+                            >
+                                {move || if updating.get() { "Updating…" } else { "Reload" }}
+                            </button>
                         }
                     })
             }}
