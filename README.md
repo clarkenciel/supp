@@ -21,14 +21,20 @@ cargo test                                   # shared + server tests
 
 # Server with the dev identity provider (anyone signs in as any name):
 cargo run -p supp-server -- serve --auth dev --public-url http://127.0.0.1:8080
-# Client with live reload; proxies /api, /auth, /join and /sync to the server:
+# Client with live reload; proxies /api, /auth, /join and /sync to the server.
+# Its service worker caches nothing, so reloads always get the latest build:
 (cd crates/web && trunk serve)               # http://127.0.0.1:8080
 
 # Accounts need an invite:
 cargo run -p supp-server -- admin invite create --public-url http://127.0.0.1:8080
 
 (cd e2e && npm install && npx playwright test)   # builds and runs everything
+
+python3 crates/web/scripts/make-icons.py     # redraw the app icons (Pillow)
 ```
+
+trunk builds need a POSIX shell: a post-build hook stamps the service worker
+with the build's version and file list.
 
 ## Running it for real
 

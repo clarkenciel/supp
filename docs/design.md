@@ -252,11 +252,42 @@ find out on their next connection.
 - Multiple tabs: each tab is its own peer with its own actor ID. Change chunks
   have random keys so writes never conflict; a `BroadcastChannel` tells other tabs
   to load new changes, which keeps tabs consistent while offline.
-- Service worker: hand-written JS, cache-first for trunk's hashed assets, with a
-  "new version, reload" prompt.
-- Call `navigator.storage.persist()` to reduce eviction risk for non-installed
-  sites.
+- Calls `navigator.storage.persist()` at startup to reduce eviction risk for
+  non-installed sites (best effort; the result is only logged).
 - `getrandom` needs its `wasm_js` backend configured for wasm builds.
+- Installable: a web app manifest with regular and maskable icons
+  (`scripts/make-icons.py` draws them; the PNGs are committed).
+
+### Service worker
+
+Hand-written (`crates/web/sw.js`), registered from the client at startup.
+
+- **Precache:** on install it caches the whole build: `index.html`, trunk's
+  hashed JS, wasm and CSS, the manifest and icons. Nothing is cached at
+  runtime, and `/api`, `/auth`, `/join` and `/sync` are never intercepted.
+- **Cache-first, navigations included:** every client route (`/`,
+  `/lists/<id>`) gets the cached `index.html`, so the app starts instantly
+  and with no network once loaded online. The cached shell always matches
+  the cached assets; network-first would instead wait out timeouts on a bad
+  connection. Other requests fall back to the network on a miss.
+- **Versioning:** a trunk `post_build` hook (`scripts/sw-version.sh`) writes
+  the staged file list and a hash of every file's name and contents into
+  `sw.js`. So `sw.js` changes exactly when the build does, which is how
+  browsers notice an update. Each version has its own cache; activation
+  deletes the others. Under `trunk serve` the hook leaves a `dev` worker
+  that caches nothing, so live reload keeps working.
+- **Updates:** a new worker installs in the background and waits; it never
+  skips waiting by itself, so a running page never mixes builds. The client
+  then shows "A new version of the app is available" with a Reload button,
+  which posts `skipWaiting` to the waiting worker, waits for it to activate
+  and reloads. `UpgradeRequired` from the server shows the same button; if
+  no new worker is waiting yet, Reload first calls `registration.update()`
+  and waits for it to install. A plain reload would bring back the cached
+  build.
+- **Server headers:** hashed assets are `immutable` for a year; everything
+  else (`index.html`, `sw.js`, manifest, icons) is `no-cache`. Only
+  extensionless paths fall back to `index.html`; a missing file is a 404,
+  so HTML is never cached under an asset's URL.
 
 ## Milestones
 
@@ -265,7 +296,7 @@ find out on their next connection.
 2. ✅ Leptos UI with IndexedDB, anonymous and fully offline.
 3. ✅ Google login (behind an identity-provider trait, with a dev provider),
    invites, admin CLI, local-list upload, WebSocket sync loop, leaving lists.
-4. PWA manifest, service worker, `UpgradeRequired` flow.
+4. ✅ PWA manifest, service worker, `UpgradeRequired` flow.
 5. List share links, multi-tab `BroadcastChannel`, backups.
 
 ## Risks and known gaps
@@ -277,6 +308,14 @@ find out on their next connection.
   a remote change to the item being typed in replaces the unsaved text.
 - **Leaving is not live:** other devices of the same user drop a left list
   on their next connection.
+- **Long-lived tabs learn of updates late:** the browser checks for a new
+  service worker on full page loads, and the app navigates client-side, so
+  an app left open sees a new build only when reloaded or when the server
+  sends `UpgradeRequired`. A periodic `registration.update()` would fix it.
+- **The `sw.js` hook needs a POSIX shell** (and `sha256sum` or `shasum`), so
+  trunk builds don't work on plain Windows. Recognising `trunk serve` relies
+  on trunk's live-reload placeholder in `index.html`; if that changes, dev
+  builds get a caching worker and an update prompt after each rebuild.
 
 - **Wasm bundle size** with automerge included. Measured at the end of
   milestone 2 (`trunk build --release`, wasm-opt `-Oz`): 2.37 MB raw / 880 KB
