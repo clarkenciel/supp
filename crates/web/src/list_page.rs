@@ -11,6 +11,7 @@ use supp_shared::{
 use crate::{
     repo::Repo,
     session::{Session, SessionChecked},
+    share::SharePanel,
     sync::SyncStatus,
 };
 
@@ -71,6 +72,7 @@ fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
     let repo = expect_context::<Repo>();
     let navigate = use_navigate();
     let (draft, set_draft) = signal(String::new());
+    let (sharing, set_sharing) = signal(false);
 
     let add = move |ev: SubmitEvent| {
         ev.prevent_default();
@@ -124,7 +126,17 @@ fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
                     repo.change(id, |l| l.title = title);
                 }
             />
+            <button
+                class="secondary"
+                aria-expanded=move || sharing.get().to_string()
+                on:click=move |_| set_sharing.update(|s| *s = !*s)
+            >
+                "Share"
+            </button>
         </header>
+        <Show when=move || sharing.get()>
+            <SharePanel id />
+        </Show>
         <ul class="items">
             <For each=ordered_ids key=|item_id| item_id.clone() let(item_id)>
                 <ItemRow doc=id list item_id />

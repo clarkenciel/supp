@@ -22,7 +22,7 @@ use supp_shared::{
 
 use crate::{
     repo::{LocalEvent, Repo},
-    session::{Session, fetch_me},
+    session::{Session, expire, fetch_me},
 };
 
 const MIN_BACKOFF: Duration = Duration::from_secs(1);
@@ -107,14 +107,6 @@ async fn run(
             }
         }
     }
-}
-
-fn expire(session: RwSignal<Session>) {
-    session.update(|s| {
-        if let Session::SignedIn(me) = s {
-            *s = Session::Expired(me.clone());
-        }
-    });
 }
 
 /// Clears the repo's change listener when the connection ends.

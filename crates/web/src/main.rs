@@ -3,6 +3,7 @@ mod overview;
 mod pwa;
 mod repo;
 mod session;
+mod share;
 mod storage;
 mod sync;
 
