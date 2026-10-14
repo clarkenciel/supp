@@ -178,10 +178,7 @@ impl Repo {
     }
 
     fn notify(&self, event: LocalEvent) {
-        let listener = self.inner.get_value().on_change.borrow().clone();
-        if let Some(listener) = listener {
-            listener(event);
-        }
+        self.inner.get_value().notify(event);
     }
 
     pub async fn left_docs(&self) -> Result<Vec<DocId>, StorageError> {
@@ -287,6 +284,15 @@ impl Repo {
     }
 }
 
+impl Inner {
+    fn notify(&self, event: LocalEvent) {
+        let listener = self.on_change.borrow().clone();
+        if let Some(listener) = listener {
+            listener(event);
+        }
+    }
+}
+
 impl OpenDoc {
     fn new(
         id: DocId,
@@ -310,6 +316,54 @@ fn hydrate_or_default(doc: &AutoCommit, id: DocId) -> ListDoc {
         logging::error!("hydrating {id}: {err}");
         ListDoc::default()
     })
+}
+
+/// Replaces the stored snapshot with one of this tab's document, after
+/// merging in the stored one: another tab may have compacted changes into it
+/// that this tab never loaded, and overwriting it would lose them.
+async fn compact_doc(inner: &Inner, id: DocId, chunks: Vec<JsValue>) {
+    let mut saved = None;
+    let mut merged = false;
+    let compacted = inner
+        .storage
+        .compact(id, &chunks, |stored| {
+            let mut docs = inner.docs.borrow_mut();
+            let open = docs.get_mut(&id)?;
+            if let Some(stored) = stored {
+                let before = open.doc.get_heads();
+                if let Err(err) = open.doc.load_incremental(&stored) {
+                    // Overwriting what we can't read could lose changes.
+                    logging::error!("merging the stored snapshot of {id}: {err}");
+                    return None;
+                }
+                if open.doc.get_heads() != before {
+                    open.view.set(hydrate_or_default(&open.doc, id));
+                    merged = true;
+                }
+            }
+            saved = Some(open.doc.get_heads());
+            Some(open.doc.save())
+        })
+        .await;
+    let mut docs = inner.docs.borrow_mut();
+    let Some(open) = docs.get_mut(&id) else {
+        return;
+    };
+    match compacted {
+        // Everything up to the saved heads is stored now.
+        Ok(true) => open.persisted_heads = saved.expect("saved when compacted"),
+        Ok(false) => open.chunks.extend(chunks),
+        Err(err) => {
+            logging::error!("compacting {id}: {err}");
+            // Keep tracking the chunks so a later compaction removes them.
+            open.chunks.extend(chunks);
+        }
+    }
+    drop(docs);
+    if merged {
+        // Changes this tab hadn't seen; the server may not have them either.
+        inner.notify(LocalEvent::Changed(id));
+    }
 }
 
 /// Writes everything after the persisted heads, looping while edits arrive
@@ -358,17 +412,10 @@ async fn persist(inner: Rc<Inner>, id: DocId) {
                     return;
                 }
             }
-            (open.chunks.len() >= COMPACT_AFTER)
-                .then(|| (open.doc.save(), std::mem::take(&mut open.chunks)))
+            (open.chunks.len() >= COMPACT_AFTER).then(|| std::mem::take(&mut open.chunks))
         };
-        if let Some((snapshot, chunks)) = compact
-            && let Err(err) = inner.storage.compact(id, &snapshot, &chunks).await
-        {
-            logging::error!("compacting {id}: {err}");
-            // Keep tracking the chunks so a later compaction removes them.
-            if let Some(open) = inner.docs.borrow_mut().get_mut(&id) {
-                open.chunks.extend(chunks);
-            }
+        if let Some(chunks) = compact {
+            compact_doc(&inner, id, chunks).await;
         }
 
         let mut docs = inner.docs.borrow_mut();

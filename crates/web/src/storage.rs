@@ -179,19 +179,43 @@ impl Storage {
 
     /// Replaces the snapshot and removes the chunks it subsumes. Chunks other
     /// tabs appended in the meantime are left alone.
-    pub async fn compact(&self, id: DocId, snapshot: &[u8], chunks: &[JsValue]) -> Result<()> {
+    ///
+    /// Another tab may have compacted changes this one never loaded into the
+    /// stored snapshot, so `save` gets that snapshot to merge before saving
+    /// the new one, inside the transaction so no other compaction can come
+    /// between. If `save` returns `None`, nothing changes. Returns whether
+    /// the snapshot was replaced.
+    pub async fn compact(
+        &self,
+        id: DocId,
+        chunks: &[JsValue],
+        save: impl FnOnce(Option<Vec<u8>>) -> Option<Vec<u8>>,
+    ) -> Result<bool> {
         let tx = self
             .db
             .transaction(&[SNAPSHOTS, CHANGES], TransactionMode::ReadWrite)?;
-        tx.object_store(SNAPSHOTS)?
-            .put(&Uint8Array::from(snapshot).into(), Some(&doc_key(id)))?
+        let snapshots = tx.object_store(SNAPSHOTS)?;
+        let stored = snapshots
+            .get(doc_key(id))?
+            .await?
+            .map(|s| bytes_of(&s))
+            .transpose()?;
+        let Some(snapshot) = save(stored) else {
+            tx.commit()?.await?;
+            return Ok(false);
+        };
+        snapshots
+            .put(
+                &Uint8Array::from(snapshot.as_slice()).into(),
+                Some(&doc_key(id)),
+            )?
             .await?;
         let changes = tx.object_store(CHANGES)?;
         for chunk in chunks {
             changes.delete(Query::Key(chunk.clone()))?.await?;
         }
         tx.commit()?.await?;
-        Ok(())
+        Ok(true)
     }
 
     /// Lists with a pending leave.
