@@ -1,6 +1,6 @@
 //! Login, invite and session flows over HTTP, using the dev identity provider.
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use axum::{
     Router,
@@ -32,11 +32,20 @@ struct Browser {
 
 impl TestApp {
     async fn new() -> Self {
-        let dir = tempfile::tempdir().unwrap();
+        Self::build(tempfile::tempdir().unwrap(), None).await
+    }
+
+    /// Also serves the web client from `dist` (inside `dir`).
+    async fn with_static_dir(dir: tempfile::TempDir, dist: PathBuf) -> Self {
+        Self::build(dir, Some(dist)).await
+    }
+
+    async fn build(dir: tempfile::TempDir, static_dir: Option<PathBuf>) -> Self {
         let store = Store::open(&dir.path().join("supp.db")).await.unwrap();
         let docs = Arc::new(Docs::new(store.clone(), 100));
         let auth = AuthConfig::new(Arc::new(DevProvider), "http://supp.test");
-        let state = AppState::new(&store, docs, auth).await.unwrap();
+        let mut state = AppState::new(&store, docs, auth).await.unwrap();
+        state.static_dir = static_dir;
         Self {
             _dir: dir,
             router: app(state),
@@ -252,16 +261,7 @@ async fn serves_the_web_client_with_spa_fallback() {
     std::fs::write(dist.join("index.html"), "<html>app</html>").unwrap();
     std::fs::write(dist.join("app.js"), "console.log(1)").unwrap();
 
-    let store = Store::open(&dir.path().join("supp.db")).await.unwrap();
-    let docs = Arc::new(Docs::new(store.clone(), 100));
-    let auth = AuthConfig::new(Arc::new(DevProvider), "http://supp.test");
-    let mut state = AppState::new(&store, docs, auth).await.unwrap();
-    state.static_dir = Some(dist);
-    let app = TestApp {
-        _dir: dir,
-        router: supp_server::app(state),
-        accounts: store.accounts(),
-    };
+    let app = TestApp::with_static_dir(dir, dist).await;
 
     let mut browser = Browser::default();
     let body = |r: Response<Body>| async { r.into_body().collect().await.unwrap().to_bytes() };
@@ -277,5 +277,13 @@ async fn serves_the_web_client_with_spa_fallback() {
     assert_eq!(
         browser.get(&app, "/api/me").await.status(),
         StatusCode::UNAUTHORIZED
+    );
+    // A missing file is not a client route: no index.html in its place.
+    assert_eq!(
+        browser
+            .get(&app, "/supp-web-fedcba9876543210.js")
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
     );
 }
