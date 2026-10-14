@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, str::FromStr};
 
 use uuid::Uuid;
 
@@ -8,8 +8,8 @@ use uuid::Uuid;
 pub struct DocId(Uuid);
 
 #[derive(Debug, thiserror::Error)]
-#[error("doc id must be 16 bytes, got {0}")]
-pub struct InvalidDocId(usize);
+#[error("invalid doc id")]
+pub struct InvalidDocId;
 
 impl DocId {
     pub fn new() -> Self {
@@ -17,9 +17,7 @@ impl DocId {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, InvalidDocId> {
-        Uuid::from_slice(bytes)
-            .map(Self)
-            .map_err(|_| InvalidDocId(bytes.len()))
+        Uuid::from_slice(bytes).map(Self).map_err(|_| InvalidDocId)
     }
 
     pub fn as_bytes(&self) -> &[u8; 16] {
@@ -39,6 +37,14 @@ impl fmt::Display for DocId {
     }
 }
 
+impl FromStr for DocId {
+    type Err = InvalidDocId;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Uuid::parse_str(s).map(Self).map_err(|_| InvalidDocId)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -47,6 +53,12 @@ mod tests {
     fn bytes_round_trip() {
         let id = DocId::new();
         assert_eq!(DocId::from_bytes(id.as_bytes()).unwrap(), id);
+    }
+
+    #[test]
+    fn string_round_trip() {
+        let id = DocId::new();
+        assert_eq!(id.to_string().parse::<DocId>().unwrap(), id);
     }
 
     #[test]
