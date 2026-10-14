@@ -5,7 +5,7 @@
 //! several tabs can append to the same document without coordinating, and
 //! Automerge accepts them in any order when loading.
 
-use automerge::Automerge;
+use automerge::AutoCommit;
 use idb::{Database, DatabaseEvent, Factory, KeyRange, ObjectStoreParams, Query, TransactionMode};
 use js_sys::{Array, Uint8Array};
 use supp_shared::DocId;
@@ -40,7 +40,7 @@ pub struct Storage {
 /// A document loaded from storage, with the keys of the change chunks folded
 /// into it so a later compaction removes exactly those.
 pub struct Loaded {
-    pub doc: Automerge,
+    pub doc: AutoCommit,
     pub chunks: Vec<JsValue>,
 }
 
@@ -98,9 +98,10 @@ impl Storage {
         let bytes = changes.get_all(Some(chunk_range(id)?), None)?.await?;
         tx.await?;
 
+        // Loading assigns a fresh random actor ID, so each tab is its own peer.
         let mut doc = match snapshot {
-            Some(snapshot) => Automerge::load(&bytes_of(&snapshot)?)?,
-            None => Automerge::new(),
+            Some(snapshot) => AutoCommit::load(&bytes_of(&snapshot)?)?,
+            None => AutoCommit::new(),
         };
         for chunk in &bytes {
             doc.load_incremental(&bytes_of(chunk)?)?;
