@@ -11,10 +11,14 @@ use std::{path::PathBuf, sync::Arc};
 
 use axum::{
     Router,
-    extract::FromRef,
+    body::Body,
+    extract::{FromRef, Request, State},
+    http::StatusCode,
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use axum_extra::extract::cookie::Key;
+use tower::ServiceExt;
 use tower_http::services::{ServeDir, ServeFile};
 
 pub use docs::Docs;
@@ -61,11 +65,29 @@ pub fn app(state: AppState) -> Router {
     if state.auth.provider.is_dev() {
         router = router.route("/auth/dev", get(auth::routes::dev_sign_in));
     }
-    if let Some(dir) = &state.static_dir {
-        // Unknown paths get index.html so client-side routes (/lists/…)
-        // survive a reload or a shared link.
-        let assets = ServeDir::new(dir).fallback(ServeFile::new(dir.join("index.html")));
-        router = router.fallback_service(assets);
+    if state.static_dir.is_some() {
+        router = router.fallback(static_files);
     }
     router.with_state(state)
+}
+
+/// Serves the built web client. Client routes (paths whose last segment has
+/// no extension, like /lists/…) get index.html so they survive a reload or
+/// a shared link. A missing file is a 404 rather than index.html.
+async fn static_files(State(app): State<AppState>, request: Request) -> Response {
+    let Some(dir) = &app.static_dir else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let file = request.uri().path().rsplit('/').next().unwrap_or_default();
+    let is_route = !file.contains('.');
+    let served = if is_route {
+        let index = ServeFile::new(dir.join("index.html"));
+        ServeDir::new(dir).fallback(index).oneshot(request).await
+    } else {
+        ServeDir::new(dir).oneshot(request).await
+    };
+    match served {
+        Ok(response) => response.map(Body::new),
+        Err(infallible) => match infallible {},
+    }
 }
