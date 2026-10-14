@@ -1,3 +1,22 @@
 [build]
 target = "index.html"
 dist = "dist"
+
+# `trunk serve` forwards server routes to a local `supp serve`, keeping the
+# client and server on one origin so session cookies just work:
+#   supp serve --auth dev --public-url http://127.0.0.1:8080
+[[proxy]]
+backend = "http://127.0.0.1:3000/api"
+
+# Login responses are redirects that set cookies; the browser must see them.
+[[proxy]]
+backend = "http://127.0.0.1:3000/auth"
+no_redirect = true
+
+[[proxy]]
+backend = "http://127.0.0.1:3000/join"
+no_redirect = true
+
+[[proxy]]
+backend = "ws://127.0.0.1:3000/sync"
+ws = true
