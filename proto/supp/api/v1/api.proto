@@ -9,3 +9,40 @@ message Me {
   string email = 2;
   string name = 3;
 }
+
+// Share links: invites that also join a list. Every route needs a session
+// and active membership of the list; any member may create, see and revoke
+// the list's links.
+
+// POST /api/lists/{doc_id}/invites. Zero means the default: one use, valid
+// for 7 days. At most 100 uses and 30 days.
+message CreateShareLink {
+  uint32 max_uses = 1;
+  uint32 expires_in_secs = 2;
+}
+
+// The response to CreateShareLink. `url` holds the secret token and is only
+// ever returned here; the server keeps just its hash.
+message CreatedShareLink {
+  string url = 1;
+}
+
+// GET /api/lists/{doc_id}/invites: the list's links that are neither
+// revoked nor expired, oldest first. Used-up links stay until they expire,
+// so the sharer can see that a link was used.
+// DELETE /api/lists/{doc_id}/invites/{id} revokes one (204; 404 if it is
+// not one of this list's live links).
+message ShareLinks {
+  repeated ShareLink links = 1;
+}
+
+message ShareLink {
+  int64 id = 1;
+  int64 created_by_user_id = 2;
+  string created_by_name = 3;
+  // Unix seconds.
+  int64 created_at = 4;
+  int64 expires_at = 5;
+  uint32 max_uses = 6;
+  uint32 uses = 7;
+}

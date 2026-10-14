@@ -11,11 +11,14 @@ use http_body_util::BodyExt;
 use prost::Message as _;
 use supp_server::{
     AppState, Docs, Store,
-    accounts::{Accounts, NewInvite, Token},
+    accounts::{Accounts, NewInvite, Token, UserId},
     app,
     auth::{AuthConfig, DevProvider},
 };
-use supp_shared::{DocId, proto::api::v1::Me};
+use supp_shared::{
+    DocId,
+    proto::api::v1::{CreateShareLink, CreatedShareLink, Me, ShareLinks},
+};
 use tower::ServiceExt;
 
 struct TestApp {
@@ -67,17 +70,32 @@ impl TestApp {
 
 impl Browser {
     async fn request(&mut self, app: &TestApp, method: Method, uri: &str) -> Response<Body> {
+        self.send(app, method, uri, None).await
+    }
+
+    /// Sends a request with an optional protobuf body.
+    async fn send(
+        &mut self,
+        app: &TestApp,
+        method: Method,
+        uri: &str,
+        body: Option<Vec<u8>>,
+    ) -> Response<Body> {
         let cookie = self
             .cookies
             .iter()
             .map(|(k, v)| format!("{k}={v}"))
             .collect::<Vec<_>>()
             .join("; ");
-        let request = Request::builder()
+        let mut request = Request::builder()
             .method(method)
             .uri(uri)
-            .header(header::COOKIE, cookie)
-            .body(Body::empty())
+            .header(header::COOKIE, cookie);
+        if body.is_some() {
+            request = request.header(header::CONTENT_TYPE, "application/x-protobuf");
+        }
+        let request = request
+            .body(body.map_or_else(Body::empty, Body::from))
             .unwrap();
         let response = app.router.clone().oneshot(request).await.unwrap();
         for set in response.headers().get_all(header::SET_COOKIE) {
@@ -244,10 +262,7 @@ async fn disabled_users_lose_their_session() {
         .sign_in(&app, &format!("/join/{}", token.as_str()), "erin")
         .await;
     let me = browser.me(&app).await.unwrap();
-    app.accounts
-        .disable_user(supp_server::accounts::UserId(me.user_id))
-        .await
-        .unwrap();
+    app.accounts.disable_user(UserId(me.user_id)).await.unwrap();
     assert!(browser.me(&app).await.is_none());
     let response = browser.sign_in(&app, "/auth/login", "erin").await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
@@ -341,4 +356,278 @@ async fn caches_hashed_assets_forever_and_revalidates_the_rest() {
             "{path}"
         );
     }
+}
+
+// Share links over the API.
+
+async fn body(response: Response<Body>) -> axum::body::Bytes {
+    response.into_body().collect().await.unwrap().to_bytes()
+}
+
+impl TestApp {
+    /// A browser signed up as `name` with an account invite.
+    async fn user(&self, name: &str) -> (Browser, UserId) {
+        let token = self.invite(None).await;
+        let mut browser = Browser::default();
+        browser
+            .sign_in(self, &format!("/join/{}", token.as_str()), name)
+            .await;
+        let id = UserId(browser.me(self).await.unwrap().user_id);
+        (browser, id)
+    }
+}
+
+impl Browser {
+    async fn create_link(
+        &mut self,
+        app: &TestApp,
+        doc: DocId,
+        request: CreateShareLink,
+    ) -> Response<Body> {
+        let uri = format!("/api/lists/{doc}/invites");
+        self.send(app, Method::POST, &uri, Some(request.encode_to_vec()))
+            .await
+    }
+
+    /// Creates a share link and returns its path (`/join/…`).
+    async fn share(&mut self, app: &TestApp, doc: DocId, request: CreateShareLink) -> String {
+        let response = self.create_link(app, doc, request).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let created = CreatedShareLink::decode(body(response).await).unwrap();
+        created
+            .url
+            .strip_prefix("http://supp.test")
+            .expect("built from the public URL")
+            .to_string()
+    }
+
+    async fn links(&mut self, app: &TestApp, doc: DocId) -> Result<ShareLinks, StatusCode> {
+        let response = self.get(app, &format!("/api/lists/{doc}/invites")).await;
+        match response.status() {
+            StatusCode::OK => Ok(ShareLinks::decode(body(response).await).unwrap()),
+            status => Err(status),
+        }
+    }
+
+    async fn revoke(&mut self, app: &TestApp, doc: DocId, id: i64) -> StatusCode {
+        let uri = format!("/api/lists/{doc}/invites/{id}");
+        self.request(app, Method::DELETE, &uri).await.status()
+    }
+}
+
+fn now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+}
+
+#[tokio::test]
+async fn members_share_lists_with_new_users() {
+    let app = TestApp::new().await;
+    let (mut owner, owner_id) = app.user("owner").await;
+    let doc = DocId::new();
+    app.accounts.authorize(owner_id, doc).await.unwrap();
+
+    let link = owner.share(&app, doc, CreateShareLink::default()).await;
+    assert!(link.starts_with("/join/"));
+    let links = owner.links(&app, doc).await.unwrap().links;
+    assert_eq!(links.len(), 1);
+    let info = &links[0];
+    assert_eq!(
+        (info.max_uses, info.uses, info.created_by_user_id),
+        (1, 0, owner_id.0)
+    );
+    assert_eq!(info.created_by_name, "owner");
+    let week = 7 * 24 * 60 * 60;
+    assert!((info.expires_at - now() - week).abs() < 5, "7-day default");
+
+    // Someone with no account signs up through it and lands on the list.
+    let mut guest = Browser::default();
+    let response = guest.sign_in(&app, &link, "guest").await;
+    assert_eq!(location(&response), format!("/lists/{doc}"));
+    let guest_id = UserId(guest.me(&app).await.unwrap().user_id);
+    assert_eq!(app.accounts.docs_for(guest_id).await.unwrap(), vec![doc]);
+
+    // The guest is a member now, and sees the link used up.
+    let links = guest.links(&app, doc).await.unwrap().links;
+    assert_eq!((links[0].uses, links[0].max_uses), (1, 1));
+
+    // Single use by default.
+    let mut late = Browser::default();
+    let response = late.sign_in(&app, &link, "late").await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn share_links_need_a_session_and_membership() {
+    let app = TestApp::new().await;
+    let (mut owner, owner_id) = app.user("owner").await;
+    let (mut stranger, _) = app.user("stranger").await;
+    let doc = DocId::new();
+    app.accounts.authorize(owner_id, doc).await.unwrap();
+    owner.share(&app, doc, CreateShareLink::default()).await;
+    let id = owner.links(&app, doc).await.unwrap().links[0].id;
+
+    let mut anonymous = Browser::default();
+    let response = anonymous
+        .create_link(&app, doc, CreateShareLink::default())
+        .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        anonymous.links(&app, doc).await.unwrap_err(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        anonymous.revoke(&app, doc, id).await,
+        StatusCode::UNAUTHORIZED
+    );
+
+    let response = stranger
+        .create_link(&app, doc, CreateShareLink::default())
+        .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        stranger.links(&app, doc).await.unwrap_err(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(stranger.revoke(&app, doc, id).await, StatusCode::NOT_FOUND);
+
+    // Leaving the list ends access too.
+    app.accounts.leave(owner_id, doc).await.unwrap();
+    let response = owner
+        .create_link(&app, doc, CreateShareLink::default())
+        .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        owner.links(&app, doc).await.unwrap_err(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(owner.revoke(&app, doc, id).await, StatusCode::NOT_FOUND);
+
+    // Garbage list IDs are just missing lists.
+    let response = owner.get(&app, "/api/lists/nope/invites").await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn sharing_a_list_not_synced_yet_claims_it() {
+    let app = TestApp::new().await;
+    let (mut owner, owner_id) = app.user("owner").await;
+    let doc = DocId::new();
+    // Looking doesn't claim it...
+    assert!(owner.links(&app, doc).await.unwrap().links.is_empty());
+    assert!(app.accounts.docs_for(owner_id).await.unwrap().is_empty());
+    // ...sharing does, just as subscribing would.
+    owner.share(&app, doc, CreateShareLink::default()).await;
+    assert_eq!(app.accounts.docs_for(owner_id).await.unwrap(), vec![doc]);
+}
+
+#[tokio::test]
+async fn existing_users_join_through_share_links() {
+    let app = TestApp::new().await;
+    let (mut owner, owner_id) = app.user("owner").await;
+    let (_, friend_id) = app.user("friend").await;
+    let doc = DocId::new();
+    app.accounts.authorize(owner_id, doc).await.unwrap();
+    let link = owner.share(&app, doc, CreateShareLink::default()).await;
+
+    // The friend's other device: an existing account signing in via the link.
+    let mut laptop = Browser::default();
+    let response = laptop.sign_in(&app, &link, "friend").await;
+    assert_eq!(location(&response), format!("/lists/{doc}"));
+    assert_eq!(app.accounts.docs_for(friend_id).await.unwrap(), vec![doc]);
+}
+
+#[tokio::test]
+async fn any_member_can_revoke_a_link() {
+    let app = TestApp::new().await;
+    let (mut owner, owner_id) = app.user("owner").await;
+    let doc = DocId::new();
+    let other_doc = DocId::new();
+    app.accounts.authorize(owner_id, doc).await.unwrap();
+    app.accounts.authorize(owner_id, other_doc).await.unwrap();
+
+    let uses = CreateShareLink {
+        max_uses: 5,
+        ..Default::default()
+    };
+    let first = owner.share(&app, doc, uses).await;
+    let second = owner.share(&app, doc, uses).await;
+    let mut member = Browser::default();
+    member.sign_in(&app, &first, "member").await;
+    let links = member.links(&app, doc).await.unwrap().links;
+    assert_eq!(links.len(), 2);
+    let (first_id, second_id) = (links[0].id, links[1].id);
+
+    // Only through the link's own list.
+    assert_eq!(
+        owner.revoke(&app, other_doc, second_id).await,
+        StatusCode::NOT_FOUND
+    );
+    // A member who didn't create it may revoke it.
+    assert_eq!(
+        member.revoke(&app, doc, second_id).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        owner.revoke(&app, doc, second_id).await,
+        StatusCode::NOT_FOUND,
+        "already revoked"
+    );
+    let links = owner.links(&app, doc).await.unwrap().links;
+    assert_eq!(links.iter().map(|l| l.id).collect::<Vec<_>>(), [first_id]);
+
+    let mut late = Browser::default();
+    let response = late.sign_in(&app, &second, "late").await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn share_link_limits_are_enforced() {
+    let app = TestApp::new().await;
+    let (mut owner, owner_id) = app.user("owner").await;
+    let doc = DocId::new();
+    app.accounts.authorize(owner_id, doc).await.unwrap();
+
+    for bad in [
+        CreateShareLink {
+            max_uses: 101,
+            ..Default::default()
+        },
+        CreateShareLink {
+            expires_in_secs: 31 * 24 * 60 * 60,
+            ..Default::default()
+        },
+    ] {
+        let response = owner.create_link(&app, doc, bad).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+    let not_protobuf = Request::builder()
+        .method(Method::POST)
+        .uri(format!("/api/lists/{doc}/invites"))
+        .header(
+            header::COOKIE,
+            format!("supp_session={}", owner.cookies["supp_session"]),
+        )
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(Body::from("max_uses=1"))
+        .unwrap();
+    let response = app.router.clone().oneshot(not_protobuf).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    assert!(owner.links(&app, doc).await.unwrap().links.is_empty());
+
+    let request = CreateShareLink {
+        max_uses: 2,
+        expires_in_secs: 3600,
+    };
+    let link = owner.share(&app, doc, request).await;
+    let info = &owner.links(&app, doc).await.unwrap().links[0];
+    assert!((info.expires_at - now() - 3600).abs() < 5);
+    for name in ["a", "b"] {
+        let response = Browser::default().sign_in(&app, &link, name).await;
+        assert_eq!(location(&response), format!("/lists/{doc}"));
+    }
+    let response = Browser::default().sign_in(&app, &link, "c").await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
