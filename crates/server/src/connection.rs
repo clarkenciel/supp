@@ -233,10 +233,17 @@ impl Connection {
     async fn subscribe(&mut self, id: DocId) -> Vec<server_message::Msg> {
         match self.app.accounts.authorize(self.user.id, id).await {
             Ok(Access::Member | Access::Claimed) => {}
-            Ok(Access::Denied) => {
+            Ok(access @ (Access::NotMember | Access::Left)) => {
+                let left = access == Access::Left;
+                let reason = if left {
+                    "you left this list"
+                } else {
+                    "not a member of this list"
+                };
                 return vec![server_message::Msg::Denied(Denied {
                     doc_id: id.as_bytes().to_vec(),
-                    reason: "not a member of this list".into(),
+                    reason: reason.into(),
+                    left,
                 })];
             }
             Err(err) => {

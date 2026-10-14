@@ -244,9 +244,15 @@ impl Connection {
             }
             Some(Msg::Denied(denied)) => {
                 if let Ok(id) = DocId::from_bytes(&denied.doc_id) {
-                    // e.g. a list from another account kept on this device.
-                    logging::warn!("not syncing {id}: {}", denied.reason);
                     self.states.remove(&id);
+                    if denied.left {
+                        // Deleted on another of this user's devices.
+                        self.repo.forget(id);
+                    } else {
+                        // e.g. a list from another account kept on this
+                        // device. It may be the only copy, so keep it.
+                        logging::warn!("not syncing {id}: {}", denied.reason);
+                    }
                 }
             }
             Some(Msg::Left(left)) => {

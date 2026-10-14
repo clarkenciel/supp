@@ -450,7 +450,10 @@ async fn lists_belong_to_whoever_syncs_them_first() {
     assert!(welcome(&mut ws).await.is_empty());
     send(&mut ws, subscribe(id)).await;
     match recv(&mut ws).await {
-        Some(server_message::Msg::Denied(d)) => assert_eq!(d.doc_id, id.as_bytes()),
+        Some(server_message::Msg::Denied(d)) => {
+            assert_eq!(d.doc_id, id.as_bytes());
+            assert!(!d.left);
+        }
         other => panic!("expected denied, got {other:?}"),
     }
 
@@ -505,7 +508,14 @@ async fn leaving_removes_a_list_from_the_account() {
         }
     }
 
+    // Another device still holding a copy can't claim it back, and is told
+    // the user left so it can drop the copy.
     let mut ws = connect_raw(server.addr, &session).await;
     assert!(welcome(&mut ws).await.is_empty());
+    send(&mut ws, subscribe(id)).await;
+    match recv(&mut ws).await {
+        Some(server_message::Msg::Denied(d)) => assert!(d.left),
+        other => panic!("expected denied, got {other:?}"),
+    }
     server.stop().await;
 }
