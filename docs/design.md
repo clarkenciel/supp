@@ -131,7 +131,11 @@ server_keys(name PK, key)  -- e.g. the login-cookie key, generated on first use
 - Load = snapshot + `load_incremental` of the change rows.
 - Compaction: after N change rows, write a fresh `save()` snapshot and delete
   the rows in one transaction.
-- Backups: `VACUUM INTO` from cron.
+- Backups: `supp admin backup <file>` runs `VACUUM INTO`, which copies one
+  consistent snapshot while the server keeps writing; run it from cron (the
+  README has an example and how to restore). It refuses to replace an
+  existing file without `--force`, and writes to `<file>.partial` before
+  renaming, so a failed run never destroys the previous backup.
 
 ### Deployment
 
@@ -236,6 +240,7 @@ supp admin invite list                                              # both kinds
 supp admin invite revoke <id>
 supp admin user list                                                # includes inviting user
 supp admin user disable <id>   # deletes sessions, revokes their outstanding invites
+supp admin backup <file> [--force]                                  # VACUUM INTO
 ```
 
 The server checks `disabled_at` on every session lookup, re-checks on each
@@ -272,6 +277,13 @@ on `Left`. So a delete made offline still reaches the account, and the next
 `Welcome` can't bring the list back meanwhile. Other devices of the same user
 find out on their next connection.
 
+Rejoining a list through a share link drops its pending leave on that
+device, or the leave would undo the join once the app reconnected. The
+callback lands on `/lists/<id>?joined=1`; at startup, before the sync loop
+exists, the client deletes that list's tombstone and strips the marker
+from the address bar and history (so going back later can't cancel a
+deliberate delete).
+
 ### Sharing and joining
 
 The list page's Share panel creates links (uses and expiry from a few
@@ -301,14 +313,52 @@ isn't in the account.
   with keyed `<For>`. Whole-document hydration is fine at list sizes.
 - Sync loop reconnects with backoff, driven by WebSocket state rather than
   `navigator.onLine`.
-- Multiple tabs: each tab is its own peer with its own actor ID. Change chunks
-  have random keys so writes never conflict; a `BroadcastChannel` tells other tabs
-  to load new changes, which keeps tabs consistent while offline.
+- Multiple tabs: each tab is its own peer with its own actor ID; see below.
 - Calls `navigator.storage.persist()` at startup to reduce eviction risk for
   non-installed sites (best effort; the result is only logged).
 - `getrandom` needs its `wasm_js` backend configured for wasm builds.
 - Installable: a web app manifest with regular and maskable icons
   (`scripts/make-icons.py` draws them; the PNGs are committed).
+
+### Multiple tabs
+
+Tabs share IndexedDB and tell each other what they wrote over a
+`BroadcastChannel`, so they stay consistent offline and signed out.
+
+- **Messages name, never carry, data:** a change chunk was stored for a
+  list, a list was added (created, or added from `Welcome`) or removed, or
+  the account changed. Receivers read IndexedDB, the one source of truth, so
+  a late or duplicate message is harmless. Each tab handles messages one at
+  a time, in order, and starts listening before its startup load.
+- **Chunks:** another tab's chunk is loaded with `load_incremental`, the
+  list's signal refreshes, and the sync loop hears of it like a local edit
+  (the server may deliver the same change too; Automerge skips duplicates).
+  Each tab keeps its own WebSocket, so changes received from the server are
+  stored once per open tab until compaction; at a few tabs that's nothing.
+- **Compaction across tabs:** a tab deletes only chunks it has written or
+  loaded, which its document contains. It also merges the stored snapshot
+  into its document before replacing it, in the same IndexedDB transaction,
+  since another tab may have compacted changes this one never loaded. A
+  chunk announced but already compacted away reads as missing, and the tab
+  reloads the list's snapshot and chunks instead.
+- **Lists:** an added list opens in the other tabs (and they subscribe to it
+  when signed in); a removed one disappears. The tab that removed it sends
+  the `Leave`.
+- **Account changes:** adopting an account and signing out announce the
+  device's user ID (or none). Tabs whose session disagrees reload; the
+  rest ignore it. Reloading rather than patching, because an account change
+  is rare and touches everything a tab builds at startup from storage and
+  `/api/me` (session, sync connection and, after an erase, every list). It
+  can't loop: only adopting what `/api/me` reports or signing out sends the
+  message, and tabs share the session cookie.
+- **Database upgrades:** on `versionchange` (a newer build in another tab
+  opening the database at a higher version) a tab closes its connection
+  rather than block the upgrade, and shows the new-version banner, since
+  nothing it does is saved any more.
+- **One socket per tab, not a leader:** electing one tab (Web Locks) to hold
+  the WebSocket and relay for the others saves a few idle connections per
+  user, but adds hand-over when the leader closes or sleeps and a relay
+  protocol between tabs. Nothing at this scale needs it.
 
 ### Service worker
 
@@ -349,8 +399,8 @@ Hand-written (`crates/web/sw.js`), registered from the client at startup.
 3. ✅ Google login (behind an identity-provider trait, with a dev provider),
    invites, admin CLI, local-list upload, WebSocket sync loop, leaving lists.
 4. ✅ PWA manifest, service worker, `UpgradeRequired` flow.
-5. List share links ✅ (API, share panel, joining lands on the list);
-   multi-tab `BroadcastChannel`, backups.
+5. ✅ List share links (API, share panel, joining lands on the list),
+   multi-tab consistency over `BroadcastChannel`, backups.
 
 ## Risks and known gaps
 
@@ -376,10 +426,15 @@ Hand-written (`crates/web/sw.js`), registered from the client at startup.
   unit and `opt-level = "z"` for the web crate. Acceptable for an app the
   service worker caches once per version; revisit if it grows.
 - **Document growth:** deletions leave tombstones. Acceptable at this scale.
-- **Rejoining over a pending leave:** if a list is deleted on a device while
-  offline and the user rejoins it through a link on that device before the
-  app has reconnected (say, from an email with the app closed), the pending
-  `Leave` goes out after the next `Welcome` and undoes the rejoin.
+- **Rejoining over a pending leave, narrowly:** the landing page drops the
+  pending leave before its own sync loop starts, but another tab of the app
+  already open on that device could reconnect after the join and before
+  the landing page has started, and send the leave in between. Separately,
+  anyone who knows a list's ID can send a `?joined=1` link that cancels a
+  pending leave of it on a device; the list just comes back from the
+  account and can be deleted again.
+- **No `BroadcastChannel`** (Safari before 15.4): tabs see each other's
+  changes only after a reload, as before milestone 5.
 - **Share links are bearer tokens:** anyone holding an unused link can join
   (and create an account). Defaults are tight (one use, 7 days), and the
   panel shows whether a link has been used.
