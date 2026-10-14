@@ -20,3 +20,9 @@ no_redirect = true
 [[proxy]]
 backend = "ws://127.0.0.1:3000/sync"
 ws = true
+
+# Stamps sw.js with this build's version and file list.
+[[hooks]]
+stage = "post_build"
+command = "sh"
+command_arguments = ["scripts/sw-version.sh"]
