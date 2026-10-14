@@ -12,23 +12,43 @@ use axum::{
     },
     response::Response,
 };
+use axum_extra::extract::CookieJar;
 use prost::Message as _;
 use supp_shared::{
     DocId, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION,
     proto::sync::v1::{
-        ClientMessage, Error, ServerMessage, SyncPayload, UpgradeRequired, Welcome, client_message,
-        server_message,
+        ClientMessage, Denied, Error, ServerMessage, SessionEnded, SyncPayload, UpgradeRequired,
+        Welcome, client_message, server_message,
     },
 };
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::{AppState, docs::DocHandle};
+use crate::{
+    AppState,
+    accounts::{Access, Token, User},
+    auth::{AuthUser, session::SESSION_COOKIE},
+    docs::DocHandle,
+};
 
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 
-pub async fn handler(ws: WebSocketUpgrade, State(app): State<AppState>) -> Response {
+/// How often an open connection re-checks its session, so logouts and
+/// disabled accounts take effect without waiting for a reconnect.
+const REVALIDATE_EVERY: Duration = Duration::from_secs(5 * 60);
+
+/// Requires a session: an unauthenticated upgrade is refused with 401.
+pub async fn handler(
+    ws: WebSocketUpgrade,
+    State(app): State<AppState>,
+    AuthUser(user): AuthUser,
+    jar: CookieJar,
+) -> Response {
+    let token = jar
+        .get(SESSION_COOKIE)
+        .map(|c| Token::from(c.value().to_string()))
+        .expect("AuthUser found the session cookie");
     ws.on_upgrade(move |socket| async move {
-        if let Err(err) = run(app, socket).await {
+        if let Err(err) = run(app, user, token, socket).await {
             tracing::debug!("connection closed: {err:#}");
         }
     })
@@ -48,14 +68,36 @@ impl Drop for AbortOnDrop {
     }
 }
 
-async fn run(app: AppState, mut socket: WebSocket) -> anyhow::Result<()> {
-    if !handshake(&mut socket).await? {
+struct Connection {
+    app: AppState,
+    user: User,
+    token: Token,
+    subs: HashMap<DocId, Subscription>,
+    /// Watcher tasks report which subscribed documents changed.
+    changed_tx: mpsc::Sender<DocId>,
+}
+
+/// Replies to a client message, or the end of the connection.
+enum Reply {
+    Send(Vec<server_message::Msg>),
+    SessionEnded,
+}
+
+async fn run(app: AppState, user: User, token: Token, mut socket: WebSocket) -> anyhow::Result<()> {
+    if !handshake(&app, &user, &mut socket).await? {
         return Ok(());
     }
 
-    let mut subs: HashMap<DocId, Subscription> = HashMap::new();
-    // Watcher tasks report which subscribed documents changed.
     let (changed_tx, mut changed_rx) = mpsc::channel::<DocId>(64);
+    let mut conn = Connection {
+        app,
+        user,
+        token,
+        subs: HashMap::new(),
+        changed_tx,
+    };
+    let mut revalidate = tokio::time::interval(REVALIDATE_EVERY);
+    revalidate.tick().await;
 
     loop {
         tokio::select! {
@@ -73,15 +115,25 @@ async fn run(app: AppState, mut socket: WebSocket) -> anyhow::Result<()> {
                         continue;
                     }
                 };
-                for reply in handle(&app, &mut subs, &changed_tx, msg).await {
-                    send(&mut socket, reply).await?;
+                match conn.handle(msg).await {
+                    Reply::Send(replies) => {
+                        for reply in replies {
+                            send(&mut socket, reply).await?;
+                        }
+                    }
+                    Reply::SessionEnded => return end_session(&mut socket).await,
                 }
             }
             Some(id) = changed_rx.recv() => {
-                if let Some(sub) = subs.get_mut(&id)
+                if let Some(sub) = conn.subs.get_mut(&id)
                     && let Some(m) = sub.doc.generate(&mut sub.state).await
                 {
                     send(&mut socket, sync_msg(id, m)).await?;
+                }
+            }
+            _ = revalidate.tick() => {
+                if !conn.session_valid().await {
+                    return end_session(&mut socket).await;
                 }
             }
         }
@@ -89,7 +141,7 @@ async fn run(app: AppState, mut socket: WebSocket) -> anyhow::Result<()> {
 }
 
 /// Returns whether the client may proceed.
-async fn handshake(socket: &mut WebSocket) -> anyhow::Result<bool> {
+async fn handshake(app: &AppState, user: &User, socket: &mut WebSocket) -> anyhow::Result<bool> {
     let frame = tokio::time::timeout(HELLO_TIMEOUT, socket.recv())
         .await
         .context("no hello")?;
@@ -110,74 +162,112 @@ async fn handshake(socket: &mut WebSocket) -> anyhow::Result<bool> {
         send(socket, upgrade).await?;
         return Ok(false);
     }
+    let docs = app.accounts.docs_for(user.id).await?;
     let welcome = server_message::Msg::Welcome(Welcome {
         protocol_version: PROTOCOL_VERSION,
+        doc_ids: docs.iter().map(|d| d.as_bytes().to_vec()).collect(),
     });
     send(socket, welcome).await?;
     Ok(true)
 }
 
-async fn handle(
-    app: &AppState,
-    subs: &mut HashMap<DocId, Subscription>,
-    changed_tx: &mpsc::Sender<DocId>,
-    msg: ClientMessage,
-) -> Vec<server_message::Msg> {
-    use client_message::Msg;
-    match msg.msg {
-        Some(Msg::Subscribe(sub)) => {
-            let Ok(id) = DocId::from_bytes(&sub.doc_id) else {
-                return vec![error("invalid doc id".into())];
-            };
-            // TODO(milestone 3): check list membership.
-            let doc = match app.docs.get(id).await {
-                Ok(doc) => doc,
-                Err(err) => {
-                    tracing::error!("loading {id}: {err:#}");
-                    return vec![error("failed to load document".into())];
-                }
-            };
-            let mut state = sync::State::new();
-            let first = doc.generate(&mut state).await;
-            let watcher = spawn_watcher(&doc, changed_tx.clone());
-            subs.insert(
-                id,
-                Subscription {
-                    doc,
-                    state,
-                    _watcher: watcher,
-                },
-            );
-            first.map(|m| sync_msg(id, m)).into_iter().collect()
-        }
-        Some(Msg::Sync(payload)) => {
-            let Ok(id) = DocId::from_bytes(&payload.doc_id) else {
-                return vec![error("invalid doc id".into())];
-            };
-            let Some(sub) = subs.get_mut(&id) else {
-                return vec![error(format!("not subscribed to {id}"))];
-            };
-            let message = match sync::Message::decode(&payload.data) {
-                Ok(m) => m,
-                Err(err) => return vec![error(format!("malformed sync message: {err}"))],
-            };
-            match sub.doc.receive(&mut sub.state, message).await {
-                Ok(reply) => reply.map(|m| sync_msg(id, m)).into_iter().collect(),
-                Err(err) => {
-                    tracing::warn!("sync {id}: {err:#}");
-                    vec![error("sync failed".into())]
-                }
+async fn end_session(socket: &mut WebSocket) -> anyhow::Result<()> {
+    send(socket, server_message::Msg::SessionEnded(SessionEnded {})).await?;
+    socket.send(WsMessage::Close(None)).await?;
+    Ok(())
+}
+
+impl Connection {
+    async fn session_valid(&self) -> bool {
+        match self.app.accounts.session_user(&self.token).await {
+            Ok(user) => user.is_some(),
+            Err(err) => {
+                // Don't drop users over a transient database error.
+                tracing::error!("revalidating session: {err}");
+                true
             }
         }
-        Some(Msg::Unsubscribe(unsub)) => {
-            if let Ok(id) = DocId::from_bytes(&unsub.doc_id) {
-                subs.remove(&id);
+    }
+
+    async fn handle(&mut self, msg: ClientMessage) -> Reply {
+        use client_message::Msg;
+        let replies = match msg.msg {
+            Some(Msg::Subscribe(sub)) => {
+                let Ok(id) = DocId::from_bytes(&sub.doc_id) else {
+                    return Reply::Send(vec![error("invalid doc id".into())]);
+                };
+                if !self.session_valid().await {
+                    return Reply::SessionEnded;
+                }
+                self.subscribe(id).await
             }
-            vec![]
+            Some(Msg::Sync(payload)) => self.sync(payload).await,
+            Some(Msg::Unsubscribe(unsub)) => {
+                if let Ok(id) = DocId::from_bytes(&unsub.doc_id) {
+                    self.subs.remove(&id);
+                }
+                vec![]
+            }
+            Some(Msg::Hello(_)) => vec![error("unexpected hello".into())],
+            // Unknown variant from a newer client.
+            None => vec![],
+        };
+        Reply::Send(replies)
+    }
+
+    async fn subscribe(&mut self, id: DocId) -> Vec<server_message::Msg> {
+        match self.app.accounts.authorize(self.user.id, id).await {
+            Ok(Access::Member | Access::Claimed) => {}
+            Ok(Access::Denied) => {
+                return vec![server_message::Msg::Denied(Denied {
+                    doc_id: id.as_bytes().to_vec(),
+                    reason: "not a member of this list".into(),
+                })];
+            }
+            Err(err) => {
+                tracing::error!("authorizing {id}: {err}");
+                return vec![error("failed to check access".into())];
+            }
         }
-        Some(Msg::Hello(_)) => vec![error("unexpected hello".into())],
-        // Unknown variant from a newer client.
-        None => vec![],
+        let doc = match self.app.docs.get(id).await {
+            Ok(doc) => doc,
+            Err(err) => {
+                tracing::error!("loading {id}: {err:#}");
+                return vec![error("failed to load document".into())];
+            }
+        };
+        let mut state = sync::State::new();
+        let first = doc.generate(&mut state).await;
+        let watcher = spawn_watcher(&doc, self.changed_tx.clone());
+        self.subs.insert(
+            id,
+            Subscription {
+                doc,
+                state,
+                _watcher: watcher,
+            },
+        );
+        first.map(|m| sync_msg(id, m)).into_iter().collect()
+    }
+
+    async fn sync(&mut self, payload: SyncPayload) -> Vec<server_message::Msg> {
+        let Ok(id) = DocId::from_bytes(&payload.doc_id) else {
+            return vec![error("invalid doc id".into())];
+        };
+        let Some(sub) = self.subs.get_mut(&id) else {
+            return vec![error(format!("not subscribed to {id}"))];
+        };
+        let message = match sync::Message::decode(&payload.data) {
+            Ok(m) => m,
+            Err(err) => return vec![error(format!("malformed sync message: {err}"))],
+        };
+        match sub.doc.receive(&mut sub.state, message).await {
+            Ok(reply) => reply.map(|m| sync_msg(id, m)).into_iter().collect(),
+            Err(err) => {
+                tracing::warn!("sync {id}: {err:#}");
+                vec![error("sync failed".into())]
+            }
+        }
     }
 }
 
