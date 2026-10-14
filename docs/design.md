@@ -67,13 +67,24 @@ One WebSocket per tab, binary protobuf frames, multiplexing many documents.
 
 ```proto
 message ClientMessage {
-  oneof msg { Hello hello = 1; Subscribe subscribe = 2; SyncPayload sync = 3; Unsubscribe unsubscribe = 4; }
+  oneof msg { Hello hello = 1; Subscribe subscribe = 2; SyncPayload sync = 3;
+              Unsubscribe unsubscribe = 4; Leave leave = 5; }
 }
 message ServerMessage {
-  oneof msg { Welcome welcome = 1; SyncPayload sync = 2; Denied denied = 3; Error error = 4; UpgradeRequired upgrade = 5; }
+  oneof msg { Welcome welcome = 1; SyncPayload sync = 2; Denied denied = 3; Error error = 4;
+              UpgradeRequired upgrade = 5; SessionEnded session_ended = 6; Left left = 7; }
 }
+message Welcome     { uint32 protocol_version = 1; repeated bytes doc_ids = 2; } // the user's lists
 message SyncPayload { bytes doc_id = 1; bytes data = 2; } // data = opaque automerge sync message
+message Denied      { bytes doc_id = 1; string reason = 2; bool left = 3; }
 ```
+
+- The upgrade requires a session (401 otherwise). `Welcome` lists the user's
+  lists so a new device can add the ones it lacks.
+- `SessionEnded` is sent before closing when the session dies (logout,
+  expiry, disabled account), so the client can tell "sign in again" from a
+  network drop.
+- `Leave` removes the list from the user's account; `Left` confirms it.
 
 - `Hello { protocol_version }` / `UpgradeRequired` let the server reject clients
   that a service worker has kept alive past their supported version, which
@@ -94,10 +105,12 @@ message SyncPayload { bytes doc_id = 1; bytes data = 2; } // data = opaque autom
   document calls `generate_sync_message` and sends the result.
 - Persist before publishing. If the server dies before the write, the client
   still has the changes and resends them on the next sync.
-- Authorization: membership checked on `Subscribe`. The first sync of an unknown
-  document ID makes the sender its owner (UUIDv4s are unguessable; existing IDs
-  cannot be claimed). Automerge has no per-change permissions, so any member can
-  edit anything in a list.
+- Authorization: membership checked on `Subscribe`. The first sync of a
+  document that has never had members makes the sender its owner (UUIDv4s are
+  unguessable). Leaving soft-deletes the membership (`left_at`), so a list
+  someone left can't be claimed back by a stale copy on another device; that
+  device gets `Denied { left: true }` and drops its copy. Automerge has no
+  per-change permissions, so any member can edit anything in a list.
 
 ### SQLite schema
 
@@ -108,9 +121,10 @@ invites(id, token_hash UNIQUE,
         doc_id NULL,       -- NULL: account-only invite; set: share link for that list
         created_by NULL,   -- NULL: admin CLI; else user id
         created_at, expires_at, max_uses, uses, revoked_at)
-list_members(doc_id, user_id, role)
+list_members(doc_id, user_id, role, added_at, left_at)
 doc_snapshots(doc_id PK, bytes)
 doc_changes(doc_id, seq, bytes)
+server_keys(name PK, key)  -- e.g. the login-cookie key, generated on first use
 ```
 
 - Load = snapshot + `load_incremental` of the change rows.
@@ -194,27 +208,49 @@ supp admin user disable <id>   # deletes sessions, revokes their outstanding inv
 The server checks `disabled_at` on every session lookup, re-checks on each
 `Subscribe`, and periodically re-validates open sockets.
 
-### First login with local data
+### Session state on the client
 
-The client sends `Subscribe` for every local document, which uploads and claims
-them. IndexedDB records `owner_user_id`.
+IndexedDB records the account (`Me`) the local lists belong to. The app renders
+from it immediately, then confirms with `GET /api/me`:
 
-- Session expires: the WebSocket upgrade returns 401; show a "sign in to resume
-  syncing" banner and keep editing locally.
-- A different account signs in on the same browser: ask before merging local
-  lists into it or wiping them.
-- Logout wipes IndexedDB (everything was uploaded at login).
+| Stored account | `/api/me`        | State                                          |
+|----------------|------------------|------------------------------------------------|
+| none           | 401              | Anonymous: local only                          |
+| none           | user             | First sign-in: adopt; local lists upload       |
+| A              | A                | Signed in                                      |
+| A              | 401              | Expired: keep editing, offer sign-in           |
+| A              | B                | Mismatch: add local lists to B, or erase them  |
+| any            | unreachable      | Trust the stored account                       |
+
+- Local lists upload by subscribing to them: the server sees unclaimed
+  documents and makes the user their owner.
+- A failed WebSocket upgrade looks the same as a network error from JS, so
+  after one the client asks `/api/me`; a 401 means Expired.
+- Sign-out needs the network: it ends the server session, then erases
+  IndexedDB. Erasing locally while the session lived on would leave the
+  browser signed in.
+
+### Leaving lists
+
+Deleting a list writes a tombstone (IndexedDB `left` store) in the same
+transaction that removes its data. The sync loop sends `Leave` for each
+tombstone after every `Welcome` (and at once if connected), and drops it only
+on `Left`. So a delete made offline still reaches the account, and the next
+`Welcome` can't bring the list back meanwhile. Other devices of the same user
+find out on their next connection.
 
 ## Client
 
-- IndexedDB: append-only `changes(doc_id, hash) → bytes`, periodic
-  `snapshot(doc_id)`, cached list index, `owner_user_id`.
+- IndexedDB stores: `docs` (local lists), `snapshots`, `changes` (append-only
+  chunks keyed `[doc id, random id]`, so tabs append without coordinating),
+  `meta` (the account), `left` (pending leaves). A new list's record and
+  first snapshot are written in one transaction.
 - After any change, hydrate `ListDoc` with autosurgeon into a `RwSignal`; render
   with keyed `<For>`. Whole-document hydration is fine at list sizes.
 - Sync loop reconnects with backoff, driven by WebSocket state rather than
   `navigator.onLine`.
-- Multiple tabs: each tab is its own peer with its own actor ID. Change rows are
-  keyed by hash so writes never conflict; a `BroadcastChannel` tells other tabs
+- Multiple tabs: each tab is its own peer with its own actor ID. Change chunks
+  have random keys so writes never conflict; a `BroadcastChannel` tells other tabs
   to load new changes, which keeps tabs consistent while offline.
 - Service worker: hand-written JS, cache-first for trunk's hashed assets, with a
   "new version, reload" prompt.
@@ -224,14 +260,23 @@ them. IndexedDB records `owner_user_id`.
 
 ## Milestones
 
-1. `shared` (proto + schema) and the server sync endpoint with SQLite storage.
-   Convergence tested with two in-process peers.
-2. Leptos UI with IndexedDB, anonymous and fully offline.
-3. Google login, invites table, admin CLI, local-list upload, WebSocket sync loop.
+1. ✅ `shared` (proto + schema) and the server sync endpoint with SQLite
+   storage and compaction. Convergence tested with two in-process peers.
+2. ✅ Leptos UI with IndexedDB, anonymous and fully offline.
+3. ✅ Google login (behind an identity-provider trait, with a dev provider),
+   invites, admin CLI, local-list upload, WebSocket sync loop, leaving lists.
 4. PWA manifest, service worker, `UpgradeRequired` flow.
-5. List share links, multi-tab `BroadcastChannel`, compaction, backups.
+5. List share links, multi-tab `BroadcastChannel`, backups.
 
-## Risks
+## Risks and known gaps
+
+- **Google code exchange is untested** against real credentials; the
+  authorization URL is tested against Google's live discovery document and
+  the surrounding routes with the dev provider.
+- **Typing over a remote edit:** item inputs re-render from the document, so
+  a remote change to the item being typed in replaces the unsaved text.
+- **Leaving is not live:** other devices of the same user drop a left list
+  on their next connection.
 
 - **Wasm bundle size** with automerge included. Measured at the end of
   milestone 2 (`trunk build --release`, wasm-opt `-Oz`): 2.37 MB raw / 880 KB
