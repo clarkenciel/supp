@@ -76,11 +76,41 @@ pub struct Storage {
     db: Database,
 }
 
-/// A document loaded from storage, with the keys of the change chunks folded
+/// A document loaded from storage, with the ids of the change chunks folded
 /// into it so a later compaction removes exactly those.
 pub struct Loaded {
     pub doc: AutoCommit,
-    pub chunks: Vec<JsValue>,
+    pub chunks: Vec<String>,
+}
+
+/// A list's stored bytes: its snapshot, if any, and change chunks by id.
+pub struct Stored {
+    snapshot: Option<Vec<u8>>,
+    chunks: Vec<(String, Vec<u8>)>,
+}
+
+impl Stored {
+    /// Just one chunk.
+    pub fn chunk(id: String, bytes: Vec<u8>) -> Self {
+        Self {
+            snapshot: None,
+            chunks: vec![(id, bytes)],
+        }
+    }
+
+    /// Loads everything into `doc` and returns the ids of the chunks.
+    /// Automerge skips changes the document already has.
+    pub fn load_into(self, doc: &mut AutoCommit) -> Result<Vec<String>> {
+        if let Some(snapshot) = &self.snapshot {
+            doc.load_incremental(snapshot)?;
+        }
+        let mut ids = Vec::with_capacity(self.chunks.len());
+        for (id, bytes) in self.chunks {
+            doc.load_incremental(&bytes)?;
+            ids.push(id);
+        }
+        Ok(ids)
+    }
 }
 
 impl Storage {
@@ -143,38 +173,68 @@ impl Storage {
         Ok(())
     }
 
-    pub async fn load(&self, id: DocId) -> Result<Loaded> {
+    /// Loads a list, or `None` if it isn't (or is no longer) on this device.
+    pub async fn load(&self, id: DocId) -> Result<Option<Loaded>> {
+        let Some(stored) = self.read(id).await? else {
+            return Ok(None);
+        };
+        // A fresh random actor ID, so each tab is its own peer.
+        let mut doc = AutoCommit::new();
+        let chunks = stored.load_into(&mut doc)?;
+        Ok(Some(Loaded { doc, chunks }))
+    }
+
+    /// A list's stored bytes, or `None` if it isn't on this device.
+    pub async fn read(&self, id: DocId) -> Result<Option<Stored>> {
         let tx = self
             .db
-            .transaction(&[SNAPSHOTS, CHANGES], TransactionMode::ReadOnly)?;
+            .transaction(&[DOCS, SNAPSHOTS, CHANGES], TransactionMode::ReadOnly)?;
+        if tx.object_store(DOCS)?.get(doc_key(id))?.await?.is_none() {
+            return Ok(None);
+        }
         let snapshot = tx.object_store(SNAPSHOTS)?.get(doc_key(id))?.await?;
         let changes = tx.object_store(CHANGES)?;
-        let chunks = changes.get_all_keys(Some(chunk_range(id)?), None)?.await?;
+        let keys = changes.get_all_keys(Some(chunk_range(id)?), None)?.await?;
         let bytes = changes.get_all(Some(chunk_range(id)?), None)?.await?;
         tx.await?;
 
-        // Loading assigns a fresh random actor ID, so each tab is its own peer.
-        let mut doc = match snapshot {
-            Some(snapshot) => AutoCommit::load(&bytes_of(&snapshot)?)?,
-            None => AutoCommit::new(),
-        };
-        for chunk in &bytes {
-            doc.load_incremental(&bytes_of(chunk)?)?;
+        let mut chunks = Vec::with_capacity(keys.len());
+        for (key, bytes) in keys.iter().zip(&bytes) {
+            let chunk = Array::from(key)
+                .get(1)
+                .as_string()
+                .ok_or(StorageError::Corrupt("chunk key"))?;
+            chunks.push((chunk, bytes_of(bytes)?));
         }
-        Ok(Loaded { doc, chunks })
+        Ok(Some(Stored {
+            snapshot: snapshot.as_ref().map(bytes_of).transpose()?,
+            chunks,
+        }))
     }
 
-    /// Appends a change chunk and returns its key.
-    pub async fn append(&self, id: DocId, bytes: &[u8]) -> Result<JsValue> {
-        let key = chunk_key(id, &uuid::Uuid::new_v4().to_string());
+    /// One change chunk, or `None` if it is gone: folded into a snapshot by
+    /// a compaction, or deleted with its list.
+    pub async fn read_chunk(&self, id: DocId, chunk: &str) -> Result<Option<Vec<u8>>> {
+        let tx = self.db.transaction(&[CHANGES], TransactionMode::ReadOnly)?;
+        let bytes = tx.object_store(CHANGES)?.get(chunk_key(id, chunk))?.await?;
+        tx.await?;
+        bytes.as_ref().map(bytes_of).transpose()
+    }
+
+    /// Appends a change chunk and returns its id.
+    pub async fn append(&self, id: DocId, bytes: &[u8]) -> Result<String> {
+        let chunk = uuid::Uuid::new_v4().to_string();
         let tx = self
             .db
             .transaction(&[CHANGES], TransactionMode::ReadWrite)?;
         tx.object_store(CHANGES)?
-            .put(&Uint8Array::from(bytes).into(), Some(&key))?
+            .put(
+                &Uint8Array::from(bytes).into(),
+                Some(&chunk_key(id, &chunk)),
+            )?
             .await?;
         tx.commit()?.await?;
-        Ok(key)
+        Ok(chunk)
     }
 
     /// Replaces the snapshot and removes the chunks it subsumes. Chunks other
@@ -188,7 +248,7 @@ impl Storage {
     pub async fn compact(
         &self,
         id: DocId,
-        chunks: &[JsValue],
+        chunks: &[String],
         save: impl FnOnce(Option<Vec<u8>>) -> Option<Vec<u8>>,
     ) -> Result<bool> {
         let tx = self
@@ -212,7 +272,7 @@ impl Storage {
             .await?;
         let changes = tx.object_store(CHANGES)?;
         for chunk in chunks {
-            changes.delete(Query::Key(chunk.clone()))?.await?;
+            changes.delete(Query::Key(chunk_key(id, chunk)))?.await?;
         }
         tx.commit()?.await?;
         Ok(true)
