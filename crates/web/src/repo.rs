@@ -4,10 +4,16 @@
 //! reconcile into the Automerge document, publish the re-hydrated value, and
 //! persist the new changes. Writes per document are serialised so chunks
 //! land in order and a failed write is retried by the next one.
+//!
+//! Syncing goes through [`Repo::generate_sync`] and [`Repo::receive_sync`];
+//! the sync client hears about local edits via [`Repo::set_change_listener`].
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use automerge::{AutoCommit, ChangeHash};
+use automerge::{
+    AutoCommit, AutomergeError, ChangeHash,
+    sync::{self, SyncDoc},
+};
 use autosurgeon::{hydrate, reconcile};
 use leptos::{logging, prelude::*, task::spawn_local};
 use supp_shared::{DocId, proto::api::v1::Me, schema::ListDoc};
@@ -33,6 +39,8 @@ pub struct Repo {
 struct Inner {
     storage: Storage,
     docs: RefCell<HashMap<DocId, OpenDoc>>,
+    /// Told about every local edit, so it can be synced.
+    on_change: RefCell<Option<Rc<dyn Fn(DocId)>>>,
 }
 
 struct OpenDoc {
@@ -62,6 +70,7 @@ impl Repo {
             inner: StoredValue::new_local(Rc::new(Inner {
                 storage,
                 docs: RefCell::new(docs),
+                on_change: RefCell::new(None),
             })),
             lists: RwSignal::new(ids),
         })
@@ -93,6 +102,7 @@ impl Repo {
             .borrow_mut()
             .insert(id, OpenDoc::new(id, doc, Vec::new(), Vec::new()));
         self.lists.update(|l| l.push(id));
+        self.notify(id);
 
         spawn_local(async move {
             if let Err(err) = inner.storage.create_doc(id, js_sys::Date::now()).await {
@@ -101,6 +111,76 @@ impl Repo {
             persist(inner, id).await;
         });
         id
+    }
+
+    /// Adds an empty local copy of a list known only from the server, so it
+    /// can be synced in. Returns whether it was new.
+    pub fn ensure(&self, id: DocId) -> bool {
+        let inner = self.inner.get_value();
+        if inner.docs.borrow().contains_key(&id) {
+            return false;
+        }
+        inner.docs.borrow_mut().insert(
+            id,
+            OpenDoc::new(id, AutoCommit::new(), Vec::new(), Vec::new()),
+        );
+        self.lists.update(|l| l.push(id));
+        spawn_local(async move {
+            if let Err(err) = inner.storage.create_doc(id, js_sys::Date::now()).await {
+                logging::error!("creating {id}: {err}");
+            }
+        });
+        true
+    }
+
+    /// Every local list, untracked.
+    pub fn ids(&self) -> Vec<DocId> {
+        self.lists.get_untracked()
+    }
+
+    pub fn set_change_listener(&self, listener: Option<Rc<dyn Fn(DocId)>>) {
+        *self.inner.get_value().on_change.borrow_mut() = listener;
+    }
+
+    fn notify(&self, id: DocId) {
+        let listener = self.inner.get_value().on_change.borrow().clone();
+        if let Some(listener) = listener {
+            listener(id);
+        }
+    }
+
+    pub fn generate_sync(&self, id: DocId, state: &mut sync::State) -> Option<sync::Message> {
+        let inner = self.inner.get_value();
+        let mut docs = inner.docs.borrow_mut();
+        docs.get_mut(&id)?.doc.sync().generate_sync_message(state)
+    }
+
+    /// Applies a sync message from the server; if it brought changes,
+    /// refreshes the view and persists them.
+    pub fn receive_sync(
+        &self,
+        id: DocId,
+        state: &mut sync::State,
+        message: sync::Message,
+    ) -> Result<(), AutomergeError> {
+        let inner = self.inner.get_value();
+        let changed = {
+            let mut docs = inner.docs.borrow_mut();
+            let Some(open) = docs.get_mut(&id) else {
+                return Ok(());
+            };
+            let before = open.doc.get_heads();
+            open.doc.sync().receive_sync_message(state, message)?;
+            let changed = open.doc.get_heads() != before;
+            if changed {
+                open.view.set(hydrate_or_default(&open.doc, id));
+            }
+            changed
+        };
+        if changed {
+            spawn_local(persist(inner, id));
+        }
+        Ok(())
     }
 
     /// Applies a local edit.
@@ -119,6 +199,7 @@ impl Repo {
             }
             open.view.set(hydrate_or_default(&open.doc, id));
         }
+        self.notify(id);
         spawn_local(persist(inner, id));
     }
 
