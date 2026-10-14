@@ -25,7 +25,7 @@ cargo run -p supp-server -- serve --auth dev --public-url http://127.0.0.1:8080
 # Its service worker caches nothing, so reloads always get the latest build:
 (cd crates/web && trunk serve)               # http://127.0.0.1:8080
 
-# Accounts need an invite:
+# Accounts need an invite, from the admin CLI or a list's Share panel:
 cargo run -p supp-server -- admin invite create --public-url http://127.0.0.1:8080
 
 (cd e2e && npm install && npx playwright test)   # builds and runs everything

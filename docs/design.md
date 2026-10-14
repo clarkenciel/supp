@@ -94,7 +94,8 @@ message Denied      { bytes doc_id = 1; string reason = 2; bool left = 3; }
 - Sync state is per connection, in memory, reset on reconnect. That costs one
   extra round trip per document per reconnect, which is fine at this scale.
 - The small REST API is defined in protobuf too (`api.proto`), so everything
-  evolves the same way. OIDC redirects stay plain HTTP.
+  evolves the same way. OIDC redirects stay plain HTTP. Request bodies must
+  be `application/x-protobuf`, which an HTML form can't send.
 
 ## Server
 
@@ -142,7 +143,8 @@ Caddy for TLS (service workers require a secure context).
 ### Anonymous use
 
 With no account, everything works locally in IndexedDB and no WebSocket is
-opened. Sharing prompts sign-in.
+opened. Sharing prompts sign-in: links are made by the server, and the people a
+list is shared with sync it through their accounts.
 
 ### Identity providers
 
@@ -175,7 +177,8 @@ table:
 - **Account invites**, created with the admin CLI (`doc_id` NULL).
 - **List share links**, created by any member of a list (`doc_id` set). These
   also create an account if the recipient doesn't have one. Defaults: single
-  use, 7-day expiry; the share dialog can raise either; links are revocable.
+  use, 7-day expiry; the share panel can raise either (up to 100 uses and 30
+  days); links are revocable.
 
 Tokens are 32 random bytes, base64url; only the SHA-256 hash is stored.
 
@@ -190,6 +193,36 @@ the callback:
 - **Known `sub`:** log in; if the invite has a `doc_id`, add the membership.
 
 `users.invite_id` records who let whom in.
+
+#### Share link API
+
+All routes need a session (401) and active membership of the list; for
+anyone else, including members who left, the list doesn't exist (404).
+
+```
+POST   /api/lists/{doc_id}/invites        CreateShareLink -> CreatedShareLink { url }
+GET    /api/lists/{doc_id}/invites        -> ShareLinks (no tokens)
+DELETE /api/lists/{doc_id}/invites/{id}   204, or 404 if not a live link of this list
+```
+
+- The URL is built from the configured public URL and returned only by the
+  POST; as with admin invites, only the token's hash is stored.
+- `CreateShareLink` fields left at zero mean the defaults; more than 100
+  uses or 30 days is a 400.
+- The GET lists links that are neither revoked nor expired, with creator,
+  uses and expiry. Used-up links stay until they expire so the sharer can
+  see that a link was used.
+- **Any member may revoke any of the list's links**, not just their own.
+  Any member can already create links and change the whole list, and a
+  link posted in the wrong place should die as soon as any member notices
+  it, not only when its creator does.
+- Creating a link uses the same check as `Subscribe`, so a list made
+  moments ago can be shared before its first sync claims it. The GET and
+  DELETE never claim (a list nobody has synced has no links).
+- State-changing routes are POST/DELETE, never GET: the `SameSite=Lax`
+  session cookie still rides on cross-site top-level GETs.
+- A link stays valid if its creator leaves the list; the remaining members
+  can revoke it. Disabling the creator revokes it.
 
 ### Admin CLI
 
@@ -238,6 +271,25 @@ tombstone after every `Welcome` (and at once if connected), and drops it only
 on `Left`. So a delete made offline still reaches the account, and the next
 `Welcome` can't bring the list back meanwhile. Other devices of the same user
 find out on their next connection.
+
+### Sharing and joining
+
+The list page's Share panel creates links (uses and expiry from a few
+presets), copies them with the Clipboard API (falling back to a selected
+read-only field where the API is missing or refused), and lists and revokes
+the list's live links. It needs the network and says so offline. Signed
+out it explains that sharing needs an account; with an account mismatch it
+asks for that to be settled first, since sharing would claim the list for
+the account now signed in.
+
+A share-link sign-in ends on `/lists/<id>`, usually on a device without the
+list. The sync loop's `Welcome` adds an empty local copy and the first sync
+fills it. Until the list has contents the page shows "Loading…" while that
+can still happen: before `/api/me` has answered (a fresh device looks
+anonymous until then), and while signed in and connecting, or connected
+with the list known but empty. The sync loop reports `Online` only after
+adding `Welcome`'s lists, so "connected and the list isn't here" means it
+isn't in the account.
 
 ## Client
 
@@ -297,7 +349,8 @@ Hand-written (`crates/web/sw.js`), registered from the client at startup.
 3. ✅ Google login (behind an identity-provider trait, with a dev provider),
    invites, admin CLI, local-list upload, WebSocket sync loop, leaving lists.
 4. ✅ PWA manifest, service worker, `UpgradeRequired` flow.
-5. List share links, multi-tab `BroadcastChannel`, backups.
+5. List share links ✅ (API, share panel, joining lands on the list);
+   multi-tab `BroadcastChannel`, backups.
 
 ## Risks and known gaps
 
@@ -323,6 +376,13 @@ Hand-written (`crates/web/sw.js`), registered from the client at startup.
   unit and `opt-level = "z"` for the web crate. Acceptable for an app the
   service worker caches once per version; revisit if it grows.
 - **Document growth:** deletions leave tombstones. Acceptable at this scale.
+- **Rejoining over a pending leave:** if a list is deleted on a device while
+  offline and the user rejoins it through a link on that device before the
+  app has reconnected (say, from an email with the app closed), the pending
+  `Leave` goes out after the next `Welcome` and undoes the rejoin.
+- **Share links are bearer tokens:** anyone holding an unused link can join
+  (and create an account). Defaults are tight (one use, 7 days), and the
+  panel shows whether a link has been used.
 - **OIDC inside an installed iOS PWA:** redirects to `accounts.google.com` and
   back have historically had cookie and window-handoff quirks. Test on a real
   device in milestone 3.
