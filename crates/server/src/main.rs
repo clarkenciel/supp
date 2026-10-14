@@ -40,7 +40,7 @@ enum Command {
         #[arg(long, env = "SUPP_GOOGLE_CLIENT_SECRET", hide_env_values = true)]
         google_client_secret: Option<String>,
     },
-    /// Manage invites and users.
+    /// Manage invites and users, and back up the database.
     Admin {
         #[command(subcommand)]
         command: AdminCommand,
@@ -61,6 +61,14 @@ enum AdminCommand {
     Invite(InviteCommand),
     #[command(subcommand)]
     User(UserCommand),
+    /// Write a consistent copy of the database (safe while serving).
+    Backup {
+        /// Where to write the copy.
+        path: PathBuf,
+        /// Replace the file if it exists.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -158,6 +166,9 @@ async fn main() -> anyhow::Result<()> {
                 AdminCommand::User(UserCommand::List) => admin::user_list(&accounts, out).await?,
                 AdminCommand::User(UserCommand::Disable { id }) => {
                     admin::user_disable(&accounts, id, out).await?
+                }
+                AdminCommand::Backup { path, force } => {
+                    admin::backup(&store, &path, force, out).await?
                 }
             }
         }

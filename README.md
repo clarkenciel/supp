@@ -61,4 +61,27 @@ Admin, over SSH on the box (same `SUPP_DB`):
 supp admin invite create [--expires 7d] [--uses 1] [--note "for Sam"]
 supp admin invite list | revoke <id>
 supp admin user list | disable <id>
+supp admin backup <file> [--force]
 ```
+
+### Backups
+
+`supp admin backup` writes a consistent copy of the database with SQLite's
+`VACUUM INTO`, which is safe while the server runs. It won't replace an
+existing file without `--force`, and writes to `<file>.partial` first, so a
+failed run never clobbers the previous backup. For example, a daily cron job
+keeping one copy per weekday (`%` must be escaped in a crontab):
+
+```cron
+17 3 * * * SUPP_DB=/var/lib/supp/supp.db /usr/local/bin/supp admin backup --force /var/backups/supp/supp-$(date +\%a).db
+```
+
+Copy the backups off the box too. They hold everything, including session
+hashes and the server's cookie key, so keep them as private as the database.
+
+To restore: stop the server, delete `supp.db-wal` and `supp.db-shm` next to
+the database if they exist (they belong to the old file), copy the backup
+over `supp.db`, and start the server again. List contents newer than the
+backup come back as devices sync, since each keeps its own copy; accounts,
+memberships, invites and sessions made since are lost, so some people may
+have to sign in again.
