@@ -27,6 +27,9 @@ enum Command {
         /// Public base URL (used for OAuth redirects and invite links).
         #[arg(long, env = "SUPP_PUBLIC_URL", default_value = "http://127.0.0.1:3000")]
         public_url: String,
+        /// Built web client to serve (crates/web/dist after `trunk build`).
+        #[arg(long, env = "SUPP_STATIC_DIR")]
+        static_dir: Option<PathBuf>,
         /// Identity provider.
         #[arg(long, env = "SUPP_AUTH", value_enum)]
         auth: AuthKind,
@@ -103,6 +106,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Serve {
             listen,
             public_url,
+            static_dir,
             auth,
             google_client_id,
             google_client_secret,
@@ -122,7 +126,9 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
             let docs = Arc::new(Docs::new(store.clone(), DEFAULT_COMPACT_AFTER));
-            let state = AppState::new(&store, docs, AuthConfig::new(provider, &public_url)).await?;
+            let mut state =
+                AppState::new(&store, docs, AuthConfig::new(provider, &public_url)).await?;
+            state.static_dir = static_dir;
             let listener = tokio::net::TcpListener::bind(listen).await?;
             tracing::info!("listening on {listen}, public URL {public_url}");
             axum::serve(listener, app(state))
