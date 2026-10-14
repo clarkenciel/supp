@@ -3,7 +3,7 @@ use std::{io::stdout, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration}
 use clap::{Parser, Subcommand, ValueEnum};
 use supp_server::{
     AppState, Docs, Store, admin, app,
-    auth::{AuthConfig, DevProvider, IdentityProvider},
+    auth::{AuthConfig, DevProvider, GoogleProvider, IdentityProvider},
     docs::DEFAULT_COMPACT_AFTER,
 };
 use tracing_subscriber::EnvFilter;
@@ -30,6 +30,12 @@ enum Command {
         /// Identity provider.
         #[arg(long, env = "SUPP_AUTH", value_enum)]
         auth: AuthKind,
+        /// OAuth client ID (required with --auth google).
+        #[arg(long, env = "SUPP_GOOGLE_CLIENT_ID")]
+        google_client_id: Option<String>,
+        /// OAuth client secret (required with --auth google).
+        #[arg(long, env = "SUPP_GOOGLE_CLIENT_SECRET", hide_env_values = true)]
+        google_client_secret: Option<String>,
     },
     /// Manage invites and users.
     Admin {
@@ -40,6 +46,8 @@ enum Command {
 
 #[derive(Clone, Copy, ValueEnum)]
 enum AuthKind {
+    /// Sign in with Google (OpenID Connect).
+    Google,
     /// Anyone signs in as any name. Local development only.
     Dev,
 }
@@ -96,8 +104,18 @@ async fn main() -> anyhow::Result<()> {
             listen,
             public_url,
             auth,
+            google_client_id,
+            google_client_secret,
         } => {
             let provider: Arc<dyn IdentityProvider> = match auth {
+                AuthKind::Google => {
+                    let (Some(id), Some(secret)) = (google_client_id, google_client_secret) else {
+                        anyhow::bail!(
+                            "--auth google needs SUPP_GOOGLE_CLIENT_ID and SUPP_GOOGLE_CLIENT_SECRET"
+                        );
+                    };
+                    Arc::new(GoogleProvider::new(id, secret)?)
+                }
                 AuthKind::Dev => {
                     tracing::warn!("DEV AUTH ENABLED: anyone can sign in as anyone");
                     Arc::new(DevProvider)
