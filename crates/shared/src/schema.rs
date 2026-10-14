@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 
 use autosurgeon::{Hydrate, Reconcile};
+use fractional_index::FractionalIndex;
 
 /// Version of the document contents. Protobuf versions only the envelope.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -31,6 +32,42 @@ pub struct Item {
     pub done: bool,
     #[autosurgeon(missing = "Default::default")]
     pub position: String,
+}
+
+impl ListDoc {
+    /// Items in display order: by position, with ties broken by ID. Ties
+    /// happen when two peers insert at the same spot concurrently.
+    pub fn ordered(&self) -> Vec<(&str, &Item)> {
+        let mut items: Vec<_> = self.items.iter().map(|(id, i)| (id.as_str(), i)).collect();
+        items.sort_by(|(a_id, a), (b_id, b)| (&a.position, a_id).cmp(&(&b.position, b_id)));
+        items
+    }
+
+    /// Position that puts an item at `index` of [`Self::ordered`], ignoring
+    /// the item `moving` (if any) so it can be repositioned.
+    pub fn position_at(&self, index: usize, moving: Option<&str>) -> String {
+        let others: Vec<_> = self
+            .ordered()
+            .into_iter()
+            .filter(|(id, _)| Some(*id) != moving)
+            .map(|(_, item)| parse(&item.position))
+            .collect();
+        let index = index.min(others.len());
+        let before = index.checked_sub(1).and_then(|i| others[i].as_ref());
+        let after = others.get(index).and_then(Option::as_ref);
+        let position = FractionalIndex::new(before, after)
+            // Equal or out-of-order neighbours (a concurrent-insert tie, or
+            // positions from a misbehaving peer): land just after `before`.
+            .or_else(|| before.map(FractionalIndex::new_after))
+            .unwrap_or_default();
+        position.to_string()
+    }
+}
+
+/// Positions that don't parse are ignored as neighbours. They still sort,
+/// since the string encoding preserves byte order.
+fn parse(position: &str) -> Option<FractionalIndex> {
+    FractionalIndex::from_string(position).ok()
 }
 
 fn default_schema_version() -> u32 {
@@ -77,6 +114,67 @@ mod tests {
                 a.sync().receive_sync_message(&mut sa, m).unwrap();
             }
         }
+    }
+
+    fn order(list: &ListDoc) -> Vec<&str> {
+        list.ordered().into_iter().map(|(id, _)| id).collect()
+    }
+
+    fn insert_at(list: &mut ListDoc, id: &str, index: usize) {
+        let position = list.position_at(index, None);
+        list.items.insert(id.into(), item(id, &position));
+    }
+
+    #[test]
+    fn positions_insert_anywhere() {
+        let mut list = ListDoc::default();
+        insert_at(&mut list, "b", 0);
+        insert_at(&mut list, "d", 1);
+        insert_at(&mut list, "a", 0);
+        insert_at(&mut list, "c", 2);
+        insert_at(&mut list, "e", 99);
+        assert_eq!(order(&list), ["a", "b", "c", "d", "e"]);
+    }
+
+    #[test]
+    fn positions_move() {
+        let mut list = ListDoc::default();
+        for (i, id) in ["a", "b", "c", "d"].into_iter().enumerate() {
+            insert_at(&mut list, id, i);
+        }
+        let to_front = list.position_at(0, Some("c"));
+        list.items.get_mut("c").unwrap().position = to_front;
+        assert_eq!(order(&list), ["c", "a", "b", "d"]);
+        let to_end = list.position_at(3, Some("a"));
+        list.items.get_mut("a").unwrap().position = to_end;
+        assert_eq!(order(&list), ["c", "b", "d", "a"]);
+    }
+
+    #[test]
+    fn positions_survive_repeated_inserts_at_one_spot() {
+        let mut list = ListDoc::default();
+        insert_at(&mut list, "first", 0);
+        insert_at(&mut list, "last", 1);
+        for i in 0..200 {
+            insert_at(&mut list, &format!("m{i:03}"), 1);
+        }
+        let ids = order(&list);
+        assert_eq!(ids.len(), 202);
+        assert_eq!(ids[0], "first");
+        assert_eq!(ids[1], "m199");
+        assert_eq!(ids[201], "last");
+    }
+
+    #[test]
+    fn tied_positions_order_by_id_and_still_accept_inserts() {
+        let mut list = ListDoc::default();
+        let p = list.position_at(0, None);
+        list.items.insert("y".into(), item("y", &p));
+        list.items.insert("x".into(), item("x", &p));
+        assert_eq!(order(&list), ["x", "y"]);
+        insert_at(&mut list, "z", 1);
+        assert_eq!(list.items.len(), 3);
+        assert_eq!(order(&list)[0], "x");
     }
 
     #[test]

@@ -11,6 +11,7 @@ anyhow = "1"
 automerge = "0.12"
 autosurgeon = "0.14"
 axum = { version = "0.8", features = ["ws"] }
+fractional_index = "2"
 clap = { version = "4", features = ["derive", "env"] }
 futures-util = "0.3"
 prost = "0.14"
