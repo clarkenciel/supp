@@ -92,11 +92,25 @@ impl Storage {
         Ok(docs.into_iter().map(|(_, id)| id).collect())
     }
 
-    pub async fn create_doc(&self, id: DocId, created_at_ms: f64) -> Result<()> {
-        let tx = self.db.transaction(&[DOCS], TransactionMode::ReadWrite)?;
+    /// Records a new list together with its initial contents, in one
+    /// transaction, so a list never exists here without them.
+    pub async fn create_doc(
+        &self,
+        id: DocId,
+        created_at_ms: f64,
+        snapshot: Option<&[u8]>,
+    ) -> Result<()> {
+        let tx = self
+            .db
+            .transaction(&[DOCS, SNAPSHOTS], TransactionMode::ReadWrite)?;
         tx.object_store(DOCS)?
             .put(&created_at_ms.into(), Some(&doc_key(id)))?
             .await?;
+        if let Some(snapshot) = snapshot {
+            tx.object_store(SNAPSHOTS)?
+                .put(&Uint8Array::from(snapshot).into(), Some(&doc_key(id)))?
+                .await?;
+        }
         tx.commit()?.await?;
         Ok(())
     }

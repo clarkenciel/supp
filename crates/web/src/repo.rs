@@ -105,18 +105,30 @@ impl Repo {
             ..Default::default()
         };
         reconcile(&mut doc, &list).expect("reconcile into empty doc");
+        let snapshot = doc.save();
+        let heads = doc.get_heads();
         let inner = self.inner.get_value();
-        // Nothing persisted yet, so the first write saves the whole doc.
-        inner
-            .docs
-            .borrow_mut()
-            .insert(id, OpenDoc::new(id, doc, Vec::new(), Vec::new()));
+        // Nothing persisted yet. Mark it as writing so edits made before the
+        // creation lands queue behind it instead of racing it.
+        let mut open = OpenDoc::new(id, doc, Vec::new(), Vec::new());
+        open.writing = true;
+        inner.docs.borrow_mut().insert(id, open);
         self.lists.update(|l| l.push(id));
         self.notify(LocalEvent::Changed(id));
 
         spawn_local(async move {
-            if let Err(err) = inner.storage.create_doc(id, js_sys::Date::now()).await {
-                logging::error!("creating {id}: {err}");
+            let created = inner
+                .storage
+                .create_doc(id, js_sys::Date::now(), Some(&snapshot))
+                .await;
+            if let Some(open) = inner.docs.borrow_mut().get_mut(&id) {
+                open.writing = false;
+                match created {
+                    Ok(()) => open.persisted_heads = heads,
+                    // persisted_heads stays empty, so the next write saves
+                    // the whole document.
+                    Err(err) => logging::error!("creating {id}: {err}"),
+                }
             }
             persist(inner, id).await;
         });
@@ -136,7 +148,11 @@ impl Repo {
         );
         self.lists.update(|l| l.push(id));
         spawn_local(async move {
-            if let Err(err) = inner.storage.create_doc(id, js_sys::Date::now()).await {
+            if let Err(err) = inner
+                .storage
+                .create_doc(id, js_sys::Date::now(), None)
+                .await
+            {
                 logging::error!("creating {id}: {err}");
             }
         });
