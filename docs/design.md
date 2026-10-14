@@ -221,8 +221,11 @@ them. IndexedDB records `owner_user_id`.
 
 ## Risks
 
-- **Wasm bundle size** with automerge included: measure after milestone 2 with
-  `wasm-opt` and brotli.
+- **Wasm bundle size** with automerge included. Measured at the end of
+  milestone 2 (`trunk build --release`, wasm-opt `-Oz`): 2.37 MB raw / 880 KB
+  gzip with default release settings; 1.87 MB / 736 KB with LTO, one codegen
+  unit and `opt-level = "z"` for the web crate. Acceptable for an app the
+  service worker caches once per version; revisit if it grows.
 - **Document growth:** deletions leave tombstones. Acceptable at this scale.
 - **OIDC inside an installed iOS PWA:** redirects to `accounts.google.com` and
   back have historically had cookie and window-handoff quirks. Test on a real
