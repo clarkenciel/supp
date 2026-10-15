@@ -36,9 +36,33 @@ test('reorders, edits and removes items', async ({ page }) => {
     await addItem(page, text);
   }
 
-  await page.getByLabel('Move up').nth(2).click();
+  // Pick-and-place: the drop zone starts in the item's own gap, and the
+  // arrow keys scroll it a gap at a time. Its pulse would keep Playwright
+  // waiting for it to hold still.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const hint = page.locator('.drop-zone .hint');
+  const dropHere = page.getByRole('button', { name: /^Drop here/ });
+  await page.getByLabel('Move', { exact: true }).nth(2).click();
+  await expect(hint).toHaveText('Where it is now');
+  await page.keyboard.press('ArrowUp');
+  await expect(hint).toHaveText('Between “a” and “b”');
+  await dropHere.click();
   await expectItems(page, ['a', 'c', 'b']);
-  await page.getByLabel('Move down').nth(0).click();
+  await expect(dropHere).toHaveCount(0);
+
+  await page.getByLabel('Move', { exact: true }).nth(0).click();
+  await page.keyboard.press('ArrowUp');
+  await expect(hint).toHaveText('Where it is now');
+  await page.keyboard.press('ArrowDown');
+  await expect(hint).toHaveText('Between “c” and “b”');
+  await dropHere.click();
+  await expectItems(page, ['c', 'a', 'b']);
+
+  await page.getByLabel('Move', { exact: true }).nth(1).click();
+  await page.keyboard.press('ArrowDown');
+  await expect(hint).toHaveText('At the end');
+  await page.keyboard.press('Escape');
+  await expect(dropHere).toHaveCount(0);
   await expectItems(page, ['c', 'a', 'b']);
 
   await items(page).nth(1).fill('apples');
