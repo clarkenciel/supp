@@ -1,8 +1,8 @@
-.git
-target
-crates/web/dist
-e2e
-docs
-*.db
-*.db-*
-Containerfile
+# Allow list: only what the image build reads.
+*
+!Cargo.toml
+!Cargo.lock
+!proto/
+!crates/
+crates/*/target/
+crates/web/dist/

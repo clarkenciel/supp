@@ -8,6 +8,10 @@ use supp_server::{
 };
 use tracing_subscriber::EnvFilter;
 
+#[cfg(target_env = "musl")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {

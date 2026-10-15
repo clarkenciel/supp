@@ -5,6 +5,9 @@
 
 ARG RUST_IMAGE=rust:1.97-alpine
 ARG TRUNK_VERSION=0.21.14
+# Dokku's `storage:ensure-directory` chowns to 32767 by default; match it so
+# the mounted /data is writable.
+ARG APP_UID=32767
 
 # --- Web client (wasm; the output is platform independent) ---
 FROM --platform=$BUILDPLATFORM ${RUST_IMAGE} AS web
@@ -23,6 +26,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 # --- Server ---
 FROM ${RUST_IMAGE} AS server
+ARG APP_UID
+# The runtime's whole filesystem besides the app: a `supp` user, its data
+# directory and a /tmp for SQLite.
+RUN mkdir -p /rootfs/etc /rootfs/data /rootfs/tmp \
+ && echo "supp:x:${APP_UID}:${APP_UID}:supp:/data:/sbin/nologin" > /rootfs/etc/passwd \
+ && echo "supp:x:${APP_UID}:" > /rootfs/etc/group \
+ && chown ${APP_UID}:${APP_UID} /rootfs/data \
+ && chmod 1777 /rootfs/tmp
 WORKDIR /src
 COPY . .
 # The musl target links statically by default, bundled SQLite included.
@@ -30,20 +41,17 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,id=supp-target-server,target=/src/target \
     cargo build --release --locked -p supp-server \
  && cp target/release/supp /supp \
- && strip /supp \
- && mkdir -p /rootfs/data /rootfs/tmp \
- && chmod 1777 /rootfs/tmp
+ && strip /supp
 
 # --- Runtime ---
 FROM scratch
-# 32767 is the uid `dokku storage:ensure-directory` chowns to by default.
-COPY --from=server --chown=32767:32767 /rootfs /
+COPY --from=server /rootfs /
 COPY --from=server /supp /supp
 COPY --from=web /src/crates/web/dist /static
 ENV SUPP_LISTEN=0.0.0.0:5000 \
     SUPP_DB=/data/supp.db \
     SUPP_STATIC_DIR=/static
-USER 32767:32767
+USER supp
 VOLUME /data
 EXPOSE 5000
 # `supp serve` shuts down gracefully on SIGINT, not SIGTERM.

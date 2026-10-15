@@ -90,8 +90,9 @@ have to sign in again.
 
 `Containerfile` builds a `scratch` image holding only the static `supp`
 binary and the built client. It listens on port 5000, keeps the database at
-`/data/supp.db` and runs as uid 32767, which is who Dokku's
-`storage:ensure-directory` gives the directory to. On the Dokku host:
+`/data/supp.db` and runs as user `supp`. Its uid defaults to 32767, the
+owner Dokku's `storage:ensure-directory` gives the directory; override it
+with `--build-arg APP_UID=...` (`dokku docker-options:add supp build ...`). On the Dokku host:
 
 ```sh
 dokku apps:create supp
