@@ -85,3 +85,32 @@ over `supp.db`, and start the server again. List contents newer than the
 backup come back as devices sync, since each keeps its own copy; accounts,
 memberships, invites and sessions made since are lost, so some people may
 have to sign in again.
+
+### Deploying with Dokku
+
+`Containerfile` builds a `scratch` image holding only the static `supp`
+binary and the built client. It listens on port 5000, keeps the database at
+`/data/supp.db` and runs as uid 32767, which is who Dokku's
+`storage:ensure-directory` gives the directory to. On the Dokku host:
+
+```sh
+dokku apps:create supp
+dokku builder-dockerfile:set supp dockerfile-path Containerfile
+dokku storage:ensure-directory supp
+dokku storage:mount supp /var/lib/dokku/data/storage/supp:/data
+dokku config:set supp SUPP_PUBLIC_URL=https://lists.example.com SUPP_AUTH=google \
+  SUPP_GOOGLE_CLIENT_ID=... SUPP_GOOGLE_CLIENT_SECRET=...
+dokku domains:set supp lists.example.com
+dokku letsencrypt:enable supp   # dokku-letsencrypt plugin
+```
+
+Then `git push dokku main`. The image needs BuildKit, Docker's default
+builder since 23.0. Admin commands run in a one-off container against the
+same volume:
+
+```sh
+dokku run supp admin invite create
+dokku run supp admin backup --force /data/backup-$(date +%a).db
+```
+
+The image has no shell, so `dokku enter` doesn't work; use `dokku run`.

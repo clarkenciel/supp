@@ -1,0 +1,8 @@
+.git
+target
+crates/web/dist
+e2e
+docs
+*.db
+*.db-*
+Containerfile
