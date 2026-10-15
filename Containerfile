@@ -80,7 +80,7 @@ RUN adduser \
     "${USER}"
 
 # The database lives on a volume at /data; SQLite may also spill temp files.
-RUN mkdir /data && chown supp:supp /data && chmod 1777 /tmp
+RUN mkdir /data
 
 ####################################################################################################
 ## Final image
@@ -90,8 +90,8 @@ FROM scratch
 COPY --from=files --chmod=444 /etc/passwd /etc/group /etc/
 COPY --from=files --chmod=444 /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=files /usr/share/zoneinfo /usr/share/zoneinfo
-COPY --from=files /tmp /tmp
-COPY --from=files /data /data
+COPY --from=files --chmod=1777 /tmp /tmp
+COPY --from=files --chown=supp:supp /data /data
 
 COPY --from=web /app/crates/web/dist /usr/share/supp/web
 COPY --from=builder /supp /bin/supp
