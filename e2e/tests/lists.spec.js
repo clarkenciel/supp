@@ -42,8 +42,17 @@ test('reorders, edits and removes items', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const hint = page.locator('.drop-zone .hint');
   const dropHere = page.getByRole('button', { name: /^Drop here/ });
+  // Rows stay where they are on screen as a move starts and ends.
+  const tops = () => Promise.all([0, 2].map(async (i) => (await items(page).nth(i).boundingBox()).y));
+  const before = await tops();
   await page.getByLabel('Move', { exact: true }).nth(2).click();
   await expect(hint).toHaveText('Where it is now');
+  expect(await tops()).toEqual(before);
+  await page.keyboard.press('Escape');
+  await expect(dropHere).toHaveCount(0);
+  expect(await tops()).toEqual(before);
+
+  await page.getByLabel('Move', { exact: true }).nth(2).click();
   await page.keyboard.press('ArrowUp');
   await expect(hint).toHaveText('Between “a” and “b”');
   await dropHere.click();
@@ -65,9 +74,38 @@ test('reorders, edits and removes items', async ({ page }) => {
   await expect(dropHere).toHaveCount(0);
   await expectItems(page, ['c', 'a', 'b']);
 
-  await items(page).nth(1).fill('apples');
-  await items(page).nth(1).press('Enter');
-  await page.getByLabel('Delete item').nth(2).click();
+  // Tapping a row puts the zone above it (top half) or below (bottom
+  // half), without reaching the row's controls.
+  const rows = page.locator('ul.items > li[data-id]');
+  await page.getByLabel('Move', { exact: true }).nth(2).click();
+  await rows.nth(0).click({ position: { x: 100, y: 5 } });
+  await expect(hint).toHaveText('At the top');
+  await rows.nth(0).click({ position: { x: 100, y: 35 } });
+  await expect(hint).toHaveText('Between “c” and “a”');
+  await rows.nth(2).click({ position: { x: 5, y: 5 } });
+  await expect(hint).toHaveText('Where it is now');
+  await expect(page.getByLabel('Done').nth(0)).not.toBeChecked();
+  await rows.nth(0).click({ position: { x: 100, y: 5 } });
+  await dropHere.click();
+  await expectItems(page, ['b', 'c', 'a']);
+
+  // Swiping or the wheel moves the zone a gap per 64px, even with nothing
+  // to scroll.
+  await page.getByLabel('Move', { exact: true }).nth(2).click();
+  await page.mouse.move(640, 300);
+  await page.mouse.wheel(0, -64);
+  await expect(hint).toHaveText('Between “b” and “c”');
+  await page.mouse.wheel(0, -64);
+  await expect(hint).toHaveText('At the top');
+  await page.mouse.wheel(0, -500);
+  await expect(hint).toHaveText('At the top');
+  await page.mouse.wheel(0, 128);
+  await expect(hint).toHaveText('Where it is now');
+  await page.keyboard.press('Escape');
+
+  await items(page).nth(2).fill('apples');
+  await items(page).nth(2).press('Enter');
+  await page.getByLabel('Delete item').nth(0).click();
   await expectItems(page, ['c', 'apples']);
 
   await page.getByLabel('Done').nth(0).check();
@@ -77,6 +115,56 @@ test('reorders, edits and removes items', async ({ page }) => {
   await page.waitForTimeout(300);
   await page.reload();
   await expectItems(page, ['apples']);
+});
+
+test('moves an item from anywhere in a long list to either end', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await createList(page, 'Long');
+  const texts = Array.from({ length: 20 }, (_, i) => `item ${i}`);
+  for (const text of texts) {
+    await addItem(page, text);
+  }
+  const hint = page.locator('.drop-zone .hint');
+  const pick = (i) => page.getByLabel('Move', { exact: true }).nth(i).click();
+
+  // No room is added around the list: scrolling, taps and keys get the
+  // zone everywhere.
+  const room = () => page.locator('ul.items').evaluate((ul) => ul.style.paddingTop + ul.style.paddingBottom);
+  await pick(12);
+  await expect(hint).toHaveText('Where it is now');
+  expect(await room()).toBe('');
+  await page.mouse.move(640, 300);
+  await page.mouse.wheel(0, -64 * 3);
+  await expect(hint).toHaveText('Between “item 8” and “item 9”');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await expect(hint).toHaveText('Where it is now');
+
+  // A swipe (here by mouse; touch is the same pointer events) moves it
+  // too, and the click that ends it doesn't count as a tap on a row.
+  await page.mouse.move(640, 400);
+  await page.mouse.down();
+  await page.mouse.move(640, 272, { steps: 8 });
+  await page.waitForTimeout(150);
+  await page.mouse.up();
+  await expect(hint).toHaveText('Between “item 14” and “item 15”');
+  for (let i = 0; i < 14; i += 1) await page.keyboard.press('ArrowUp');
+  await expect(hint).toHaveText('At the top');
+  await page.screenshot({ path: process.env.SHOTS ? `${process.env.SHOTS}/top.png` : undefined });
+  for (let i = 0; i < 19; i += 1) await page.keyboard.press('ArrowDown');
+  await expect(hint).toHaveText('At the end');
+  await page.screenshot({ path: process.env.SHOTS ? `${process.env.SHOTS}/end.png` : undefined });
+  await page.getByRole('button', { name: /^Drop here/ }).click();
+  await expectItems(page, [...texts.filter((t) => t !== 'item 12'), 'item 12']);
+
+  await pick(3);
+  expect(await room()).toBe('');
+  await page.screenshot({ path: process.env.SHOTS ? `${process.env.SHOTS}/entry.png` : undefined });
+  for (let i = 0; i < 3; i += 1) await page.keyboard.press('ArrowUp');
+  await expect(hint).toHaveText('At the top');
+  await page.getByRole('button', { name: /^Drop here/ }).click();
+  await expect(items(page).first()).toHaveValue('item 3');
 });
 
 test('keeps working when the network goes away', async ({ page, context }) => {
