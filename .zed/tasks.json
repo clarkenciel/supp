@@ -1,0 +1,67 @@
+// Zed tasks: run with `task: spawn` (alt-shift-t), rerun with `task: rerun`.
+[
+  {
+    "label": "server (dev auth)",
+    "command": "cargo run -p supp-server -- serve --auth dev --public-url http://127.0.0.1:8080",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "web (trunk serve, live reload)",
+    "command": "trunk serve",
+    "cwd": "$ZED_WORKTREE_ROOT/crates/web",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "invite: create",
+    "command": "cargo run -p supp-server -- admin invite create --public-url http://127.0.0.1:8080",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "always"
+  },
+  {
+    "label": "test: rust (all crates)",
+    "command": "cargo test --workspace",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "always"
+  },
+  {
+    "label": "test: shared",
+    "command": "cargo test -p supp-shared",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "always"
+  },
+  {
+    "label": "test: server",
+    "command": "cargo test -p supp-server",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "always"
+  },
+  {
+    "label": "test: web",
+    "command": "cargo test -p supp-web",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "always"
+  },
+  {
+    "label": "test: e2e (playwright)",
+    "command": "npx playwright test",
+    "cwd": "$ZED_WORKTREE_ROOT/e2e",
+    "reveal": "always"
+  },
+  {
+    "label": "test: e2e current file",
+    "command": "npx playwright test \"$ZED_FILENAME\"",
+    "cwd": "$ZED_WORKTREE_ROOT/e2e",
+    "reveal": "always"
+  },
+  {
+    "label": "test: e2e UI mode",
+    "command": "npx playwright test --ui",
+    "cwd": "$ZED_WORKTREE_ROOT/e2e",
+    "reveal": "always"
+  }
+]
