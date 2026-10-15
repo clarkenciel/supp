@@ -1,0 +1,7 @@
+# Only the workspace sources go into the build context.
+.git
+.zed
+target
+crates/web/dist
+e2e
+*.db*
