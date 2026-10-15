@@ -22,6 +22,10 @@
 
 * { box-sizing: border-box; }
 
+/* Moving an item hides the page's scrollbar; keep its space so nothing
+   shifts sideways. */
+html { scrollbar-gutter: stable; }
+
 body {
   margin: 0;
   background: var(--bg);
@@ -114,8 +118,10 @@ ul { list-style: none; margin: 0; padding: 0; }
 .items .text { flex: 1; border-color: transparent; }
 .items li.done .text { text-decoration: line-through; color: var(--muted); }
 
-/* Pick-and-place: room above and below so any gap can reach the middle. */
-ul.items.moving { padding-block: 50vh; }
+/* Pick-and-place. While moving, a tap on a row places the drop zone
+   rather than reaching the row's controls. */
+.items.moving li[data-id] { cursor: pointer; user-select: none; }
+.items.moving li[data-id] > * { pointer-events: none; }
 .items li.moving {
   opacity: 0.3;
   outline: 2px dashed var(--muted);
