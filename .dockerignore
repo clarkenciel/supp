@@ -1,7 +1,11 @@
-# Only the workspace sources go into the build context.
-.git
-.zed
-target
-crates/web/dist
-e2e
-*.db*
+# Allowlist: ignore everything, then re-include what the Containerfile copies.
+*
+!Cargo.toml
+!Cargo.lock
+!proto/
+!crates/
+
+# Build output and local state that can live under the re-included paths.
+**/target/
+crates/web/dist/
+**/*.db*
