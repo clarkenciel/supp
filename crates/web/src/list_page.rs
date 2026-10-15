@@ -200,9 +200,9 @@ fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
             <div class="mover" role="region" aria-label="Moving item">
                 <div class="mover-text">
                     <p class="moving-item">{moving_text}</p>
-                    <p class="hint">"Tap a gap to move it there"</p>
+                    <p class="hint">"Tap an arrow to move it there"</p>
                 </div>
-                <button class="danger" on:click=move |_| mover.finish()>
+                <button class="pop" on:click=move |_| mover.finish()>
                     "Cancel"
                 </button>
             </div>
@@ -344,10 +344,16 @@ fn Gutter(mover: Mover, before: Option<String>) -> impl IntoView {
     };
     view! {
         <button class="gutter" aria-label=label on:click=drop>
-            <span class="flag" aria-hidden="true"></span>
+            <svg class="arrow" viewBox="0 0 40 28" aria-hidden="true">
+                <path class="shadow" transform="translate(3 3)" d=ARROW />
+                <path class="face" d=ARROW />
+            </svg>
         </button>
     }
 }
+
+/// A chunky arrow pointing left into its gap.
+const ARROW: &str = "M3 13L15 4Q17 3 17 5L17 9L31 9Q34 9 34 12L34 14Q34 17 31 17L17 17L17 21Q17 23 15 22Z";
 
 /// Where an item would land in front of `before` (or at the end).
 struct Slot {
@@ -490,7 +496,7 @@ fn ItemRow(doc: DocId, list: Signal<ListDoc>, mover: Mover, item_id: String) -> 
             >
                 "⠿"
             </button>
-            <button class="icon" aria-label="Delete item" on:click=remove>
+            <button class="icon delete" aria-label="Delete item" on:click=remove>
                 "×"
             </button>
         </li>
