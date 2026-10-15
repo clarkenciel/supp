@@ -1,0 +1,81 @@
+# Supp design system
+
+Supp is an offline-first list app you share with people. Its interface is quiet: stone neutrals, one blue accent and system type keep attention on the list. Bright **Memphis pops** (pink, yellow and cyan shapes with ink outlines and hard offset shadows) appear only while you are directly moving things around. When the pops show up, the app is in a mode, and leaving that mode puts everything back to calm.
+
+The tokens live at the top of `crates/web/style.css`. Every rule below that file's token block takes its colors, spacing, radii and type sizes from them.
+
+## Principles
+
+1. **Quiet by default.** Use `--bg`, `--fg`, `--muted` and `--line` for almost everything. `--accent` marks the one primary action on a screen and links.
+2. **Play where you touch.** `--pop-*` colors, ink outlines and `--pop-offset-*` shadows belong to direct manipulation only (today: reordering). Don't use them for decoration, status or ordinary buttons.
+3. **Modes never move content.** Entering a mode must not change layout. Reorder drop targets are drawn over the existing row edges, and the e2e suite checks that rows don't shift.
+4. **The platform's type and theme.** `--font-sans` is the system UI face. Light and dark follow `prefers-color-scheme`. There is no in-app toggle.
+
+## Color
+
+| Token | Light | Dark | Use |
+| --- | --- | --- | --- |
+| `--bg` | `#fafaf9` | `#1c1917` | Page and sheet background. `index.html`'s `theme-color` metas copy these two values. |
+| `--fg` | `#1c1917` | `#f5f5f4` | Text, and the ink outline on pop shapes. |
+| `--muted` | `#78716c` | `#a8a29e` | Secondary text: hints, progress counts, done items, icon buttons. |
+| `--line` | `#e7e5e4` | `#44403c` | Row dividers, input and secondary-button borders. |
+| `--accent` | `#2563eb` | `#60a5fa` | Primary buttons, links, the pressed grip, focus rings. |
+| `--on-accent` | `#ffffff` | `#ffffff` | Text on `--accent`. |
+| `--danger` | `#dc2626` | `#f87171` | Destructive actions, offline status and errors. Outline style, never filled. |
+| `--pop-pink` | `#f472b6` | same | Pop face or shadow. |
+| `--pop-yellow` | `#facc15` | same | Pop face or shadow, and the fill of a pop button. |
+| `--pop-cyan` | `#22d3ee` | same | Pop face or shadow, and the moving row's shadow. |
+| `--pop-ink` | `#0c0a09` | same | Text on a pop fill. |
+
+### Contrast (WCAG)
+
+- Text: `--fg` on `--bg` is 16.7:1 (light) and 16.0:1 (dark). `--muted` is 4.6:1 and 6.9:1. `--danger` is 4.6:1 and 6.3:1. `--accent` text is 5.0:1 and 6.9:1. `--pop-ink` on `--pop-yellow` is 12.9:1.
+- **Known failure:** `--on-accent` on `--accent` passes in light (5.2:1) but is **2.5:1 in dark**, so white labels on dark-mode primary buttons are below 4.5:1. The fix is a dark `--on-accent` of `--bg` (about 6.9:1). That's a visible change, so it is not made yet.
+- Pop colors on the light background are 1.5–2.5:1. A pop shape must therefore always carry the 1.5px `--fg` outline, which gives the shape its contrast. Never use a pop color for text or for a thin line.
+
+## Pops
+
+- **Rotation.** Repeated pop shapes cycle pink, then yellow, then cyan. Each shape's shadow is the next color in that cycle: a pink face has a yellow shadow, yellow has cyan, cyan has pink.
+- **Outline.** A pop shape has a 1.5px stroke in `--fg` (SVG). A pop box has a 2px border or outline in `--fg`.
+- **Shadow.** A hard offset with no blur: `--pop-offset-sm` (3px) on small controls, `--pop-offset-lg` (4px) on rows and cards.
+- **Geometry.** Pop boxes use `--radius-pop` (4px). Pops are boxier than the rest of the UI on purpose.
+- **Shape carries meaning.** Shapes say what they do, so the drop target is an arrow pointing at its gap and not an abstract blob. Color never carries the meaning on its own.
+
+## Type
+
+The app uses one family, `--font-sans` (`system-ui, sans-serif`), on a scale of five sizes:
+
+| Token | Size | Where |
+| --- | --- | --- |
+| `--text-sm` | 0.875rem | Hints, the account bar, share links, small buttons. |
+| (body) | 1rem | Everything else. |
+| `--text-lg` | 1.25rem | The list title (weight 600). |
+| `--text-xl` | 1.5rem | Page headings (`h1`). |
+| `--text-2xl` | 1.75rem | The back chevron glyph. |
+
+Weights: 400 for body text, 600 for titles and the item being moved, and 800 only for labels on pop fills.
+
+## Spacing, radius and layout
+
+- **Spacing** uses a 4px step: `--space-1` 0.25rem, `--space-2` 0.5rem, `--space-3` 0.75rem, `--space-4` 1rem, `--space-8` 2rem. Lay out siblings with `gap` and keep margins for separating sections.
+- **Radius:** `--radius-control` (6px) for inputs, buttons and selects. `--radius-panel` (8px) for bordered panels such as Share. `--radius-pop` (4px) for pops.
+- **Measure:** content and the bottom sheet are capped at `--measure` (40rem) and centered.
+- **Elevation:** only the bottom sheet floats, with `--shadow-sheet`. Everything else is flat and separated by `--line`.
+
+## Components
+
+- **Button**: the default is primary (`--accent` fill). `.secondary` is a transparent fill with an `--fg` label. `.danger` is outlined in `--danger`. `.icon` is borderless and `--muted`. `.link` looks like a link. `.pop` is the one pop button, used in the mover sheet. Use at most one primary or pop button per view.
+- **Text field**: a transparent fill with a `--line` border and `--radius-control`. Inline-editable text (the list title and item text) hides the border until focus.
+- **Item row**: checkbox, text field, grip (`⠿`) and delete (`×`), separated by `--line`. Done items get a strikethrough in `--muted`.
+- **Drop arrow** (`.gutter`): the reorder target. A dotted `--fg` line at 45% runs along the row edge to a pop arrow at the right. It is zero-height, so the list never grows. Gutters aren't offered next to the moving item, because dropping there does nothing.
+- **Moving row**: the picked-up row gets a 2px `--fg` outline and a `--pop-offset-lg` cyan shadow. Its delete button is hidden.
+- **Mover sheet**: a fixed bottom sheet with a 2px `--fg` top border, a pink zigzag, the moving item's text, a `--muted` hint and a `.pop` Cancel button. Escape also cancels.
+- **Share panel**: a `--line`-bordered `--radius-panel` box with stacked content and `--muted` hints.
+
+## Icons and imagery
+
+There is no icon font. Glyphs are typed characters: `‹` back, `⠿` grip, `×` delete. Use inline SVG only where a shape has to be drawn, like the drop arrow. The app icon (`crates/web/icons/`) is a white checklist on the accent blue.
+
+## Voice
+
+Labels are short and sentence case, and they say what happens: "Tap an arrow to move it there", "Clear done", "Delete list". Accessible names quote item text with curly quotes ("Move between “a” and “b”"), and the e2e tests depend on that wording.

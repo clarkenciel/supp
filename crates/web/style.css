@@ -1,15 +1,47 @@
+/* Design tokens. Every color, size and offset below comes from here;
+   docs/design-system.md says what each is for. */
 :root {
   color-scheme: light dark;
+
+  /* Neutrals and roles (stone grays, blue accent). */
   --bg: #fafaf9;
   --fg: #1c1917;
   --muted: #78716c;
   --line: #e7e5e4;
   --accent: #2563eb;
+  --on-accent: #ffffff;
   --danger: #dc2626;
+
+  /* Memphis pops: playful accents for direct manipulation (reordering). */
   --pop-pink: #f472b6;
   --pop-yellow: #facc15;
   --pop-cyan: #22d3ee;
-  font-family: system-ui, sans-serif;
+  --pop-ink: #0c0a09;
+  --pop-offset-sm: 3px;
+  --pop-offset-lg: 4px;
+
+  --shadow-sheet: 0 -4px 12px rgb(0 0 0 / 0.2);
+
+  /* Spacing, on a 4px step. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-8: 2rem;
+
+  --radius-pop: 0.25rem;
+  --radius-control: 0.375rem;
+  --radius-panel: 0.5rem;
+
+  --font-sans: system-ui, sans-serif;
+  --text-sm: 0.875rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 1.75rem;
+
+  --measure: 40rem;
+
+  font-family: var(--font-sans);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -32,19 +64,19 @@ body {
 }
 
 main {
-  max-width: 40rem;
+  max-width: var(--measure);
   margin: 0 auto;
-  padding: 1rem;
+  padding: var(--space-4);
 }
 
 header {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
 }
 
-h1 { margin: 0; font-size: 1.5rem; }
+h1 { margin: 0; font-size: var(--text-xl); }
 
 a { color: var(--accent); }
 
@@ -53,18 +85,18 @@ input[type="text"] {
   color: inherit;
   background: transparent;
   border: 1px solid var(--line);
-  border-radius: 0.375rem;
-  padding: 0.5rem;
+  border-radius: var(--radius-control);
+  padding: var(--space-2);
   min-width: 0;
 }
 
 button {
   font: inherit;
   border: 1px solid var(--line);
-  border-radius: 0.375rem;
-  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-control);
+  padding: var(--space-2) var(--space-3);
   background: var(--accent);
-  color: white;
+  color: var(--on-accent);
   cursor: pointer;
 }
 
@@ -75,19 +107,19 @@ button.icon {
   background: transparent;
   color: var(--muted);
   border: none;
-  padding: 0.5rem;
+  padding: var(--space-2);
   min-width: 2.25rem;
 }
 
 .back {
-  font-size: 1.75rem;
+  font-size: var(--text-2xl);
   text-decoration: none;
-  padding: 0 0.5rem;
+  padding: 0 var(--space-2);
 }
 
 .list-title {
   flex: 1;
-  font-size: 1.25rem !important;
+  font-size: var(--text-lg) !important;
   font-weight: 600;
   border-color: transparent !important;
 }
@@ -97,7 +129,7 @@ ul { list-style: none; margin: 0; padding: 0; }
 .lists li a {
   display: flex;
   justify-content: space-between;
-  padding: 0.75rem 0.25rem;
+  padding: var(--space-3) var(--space-1);
   border-bottom: 1px solid var(--line);
   text-decoration: none;
   color: inherit;
@@ -108,12 +140,12 @@ ul { list-style: none; margin: 0; padding: 0; }
 .items li {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: var(--space-1);
   border-bottom: 1px solid var(--line);
-  padding: 0.25rem 0;
+  padding: var(--space-1) 0;
 }
 
-.items input[type="checkbox"] { width: 1.25rem; height: 1.25rem; margin: 0 0.5rem; }
+.items input[type="checkbox"] { width: 1.25rem; height: 1.25rem; margin: 0 var(--space-2); }
 .items .text { flex: 1; border-color: transparent; }
 .items li.done .text { text-decoration: line-through; color: var(--muted); }
 
@@ -124,8 +156,8 @@ ul { list-style: none; margin: 0; padding: 0; }
 .items li.moving {
   outline: 2px solid var(--fg);
   outline-offset: -2px;
-  border-radius: 0.25rem;
-  box-shadow: 4px 4px 0 var(--pop-cyan);
+  border-radius: var(--radius-pop);
+  box-shadow: var(--pop-offset-lg) var(--pop-offset-lg) 0 var(--pop-cyan);
 }
 .items .grip[aria-pressed="true"] { color: var(--accent); }
 .items.moving li[data-id] > * { pointer-events: none; }
@@ -185,15 +217,15 @@ ul { list-style: none; margin: 0; padding: 0; }
   left: 0;
   right: 0;
   bottom: 0;
-  max-width: 40rem;
+  max-width: var(--measure);
   margin: 0 auto;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
   background: var(--bg);
   border-top: 2px solid var(--fg);
-  box-shadow: 0 -4px 12px rgb(0 0 0 / 0.2);
+  box-shadow: var(--shadow-sheet);
 }
 /* A zigzag riding the sheet's top edge. */
 .mover::before {
@@ -208,10 +240,10 @@ ul { list-style: none; margin: 0; padding: 0; }
 }
 .mover button.pop {
   background: var(--pop-yellow);
-  color: #0c0a09;
+  color: var(--pop-ink);
   border: 2px solid var(--fg);
-  border-radius: 0.25rem;
-  box-shadow: 3px 3px 0 var(--pop-pink);
+  border-radius: var(--radius-pop);
+  box-shadow: var(--pop-offset-sm) var(--pop-offset-sm) 0 var(--pop-pink);
   font-weight: 800;
 }
 .mover-text { flex: 1; min-width: 0; }
@@ -222,12 +254,12 @@ ul { list-style: none; margin: 0; padding: 0; }
   white-space: nowrap;
 }
 .mover .moving-item { font-weight: 600; }
-.mover .hint { color: var(--muted); font-size: 0.875rem; }
+.mover .hint { color: var(--muted); font-size: var(--text-sm); }
 
 form.add {
   display: flex;
-  gap: 0.5rem;
-  margin: 1rem 0;
+  gap: var(--space-2);
+  margin: var(--space-4) 0;
 }
 
 form.add input { flex: 1; }
@@ -235,8 +267,8 @@ form.add input { flex: 1; }
 footer {
   display: flex;
   justify-content: space-between;
-  gap: 0.5rem;
-  margin-top: 2rem;
+  gap: var(--space-2);
+  margin-top: var(--space-8);
 }
 
 .status { color: var(--muted); }
@@ -246,16 +278,16 @@ nav.account {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem 0.75rem;
+  gap: var(--space-2) var(--space-3);
   justify-content: flex-end;
-  font-size: 0.875rem;
-  margin-bottom: 0.5rem;
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-2);
 }
 
 nav.account .muted, nav.account .who { color: var(--muted); }
 nav.account .banner { flex-basis: 100%; text-align: right; }
 nav.account .banner.error { color: var(--danger); }
-nav.account button { font-size: 0.875rem; padding: 0.25rem 0.5rem; }
+nav.account button { font-size: var(--text-sm); padding: var(--space-1) var(--space-2); }
 
 button.link {
   background: none;
@@ -273,49 +305,49 @@ select {
   color: inherit;
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 0.375rem;
-  padding: 0.5rem;
+  border-radius: var(--radius-control);
+  padding: var(--space-2);
 }
 
 .share {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--space-3);
   border: 1px solid var(--line);
-  border-radius: 0.5rem;
-  padding: 0.75rem;
-  margin-bottom: 1rem;
+  border-radius: var(--radius-panel);
+  padding: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 .share p { margin: 0; }
-.share .hint { color: var(--muted); font-size: 0.875rem; }
+.share .hint { color: var(--muted); font-size: var(--text-sm); }
 
 form.share-new {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 form.share-new label {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.875rem;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
   color: var(--muted);
 }
 
-.share-created { display: flex; gap: 0.5rem; }
+.share-created { display: flex; gap: var(--space-2); }
 .share-created input { flex: 1; }
 
 .share-links li {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.25rem 0;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
   border-bottom: 1px solid var(--line);
-  font-size: 0.875rem;
+  font-size: var(--text-sm);
 }
 
-.share-links button { font-size: 0.875rem; padding: 0.25rem 0.5rem; }
+.share-links button { font-size: var(--text-sm); padding: var(--space-1) var(--space-2); }
