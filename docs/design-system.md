@@ -81,7 +81,7 @@ Weights: 400 for body text, 600 for titles and the item being moved, and 800 onl
 
 ## Icons and imagery
 
-There is no icon font. Glyphs are typed characters: `‹` back, `⠿` grip, `×` delete. Use inline SVG only where a shape has to be drawn, like the drop arrow. The app icon (`crates/web/icons/`) is a white checklist on the accent blue.
+There is no icon font. Glyphs are typed characters: `‹` back, `⠿` grip, `×` delete. Use inline SVG only where a shape has to be drawn, like the drop arrow. The app icon (`crates/web/icons/`, drawn in `icon.svg`) is the add button's yellow pebble with an ink tick and a pink offset shadow, on an `fg`-dark tile. The maskable PNG shrinks the pebble into Android's safe zone, and the browser uses the SVG as its favicon.
 
 ## Voice
 
