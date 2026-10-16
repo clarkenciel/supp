@@ -32,6 +32,11 @@ tower-http.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
+# musl's malloc is slow and fragments under load; static builds (the
+# Containerfile) swap in mimalloc. See src/main.rs.
+[target.'cfg(target_env = "musl")'.dependencies]
+mimalloc = "0.1"
+
 [dev-dependencies]
 autosurgeon.workspace = true
 tempfile.workspace = true
