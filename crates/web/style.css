@@ -284,6 +284,8 @@ ul.lists { display: flex; flex-direction: column; gap: var(--space-3); }
 
 .mover {
   position: fixed;
+  /* Above the drop targets (z-index 1) of rows scrolled under it. */
+  z-index: 10;
   left: 0;
   right: 0;
   bottom: 0;

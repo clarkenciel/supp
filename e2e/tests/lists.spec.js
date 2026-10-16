@@ -103,6 +103,25 @@ test('moves an item from anywhere in a long list to either end', async ({ page }
   await page.mouse.move(640, 300);
   await page.mouse.wheel(0, -5000);
   await expect.poll(() => page.evaluate(() => scrollY)).toBe(0);
+  // Rows scrolled under the sheet stay under it, drop targets included.
+  const covered = await page.evaluate(() => {
+    const sheet = document.querySelector('.mover').getBoundingClientRect();
+    // Scroll a drop target to the middle of the sheet.
+    const below = [...document.querySelectorAll('.gutter')]
+      .map((g) => g.getBoundingClientRect())
+      .find((r) => r.top > sheet.top);
+    scrollBy(0, below.top + below.height / 2 - (sheet.top + sheet.height / 2));
+    const hits = [];
+    for (let y = sheet.top + 2; y < sheet.bottom; y += 4) {
+      for (let x = sheet.left + 10; x < sheet.right; x += 20) {
+        hits.push(document.elementFromPoint(x, y).closest('.mover') !== null);
+      }
+    }
+    return hits.every(Boolean);
+  });
+  expect(covered).toBe(true);
+  await page.mouse.wheel(0, -5000);
+  await expect.poll(() => page.evaluate(() => scrollY)).toBe(0);
   await gap('Move to the top').click();
   await expect(items(page).first()).toHaveValue('item 12');
 
