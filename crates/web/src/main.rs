@@ -19,7 +19,7 @@ use crate::{
     overview::Overview,
     pwa::NewVersion,
     repo::Repo,
-    session::{AccountBar, Session, SessionChecked},
+    session::{Session, SessionChecked},
     sync::SyncStatus,
 };
 
@@ -77,7 +77,6 @@ fn App(repo: Repo, session: Session) -> impl IntoView {
     sync::run_while_signed_in(repo, session, status);
     view! {
         <main>
-            <AccountBar />
             <Router>
                 <Routes fallback=|| view! { <p class="status">"Not found."</p> }>
                     <Route path=path!("/") view=Overview />

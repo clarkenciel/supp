@@ -53,10 +53,19 @@ async function createList(page, title) {
   await expect(page.getByLabel('List title')).toHaveValue(title);
 }
 
+/** Adds an item through the add sheet, then closes it. */
 async function addItem(page, text) {
+  await page.getByRole('button', { name: 'Add item' }).click();
   await page.getByLabel('New item').fill(text);
   await page.getByLabel('New item').press('Enter');
   await expect(items(page).last()).toHaveValue(text);
+  await page.keyboard.press('Escape');
+  await expect(page.getByLabel('New item')).toBeHidden();
+}
+
+/** Opens the account menu behind the title bar's account icon. */
+async function openAccount(page) {
+  await page.getByRole('button', { name: /^Account:/ }).click();
 }
 
 /**
@@ -70,5 +79,5 @@ async function goOffline(context) {
 }
 
 module.exports = {
-  admin, invite, userId, uniqueName, signIn, items, expectItems, createList, addItem, goOffline,
+  admin, invite, userId, uniqueName, signIn, items, expectItems, createList, addItem, openAccount, goOffline,
 };

@@ -2,7 +2,7 @@ use leptos::{ev::SubmitEvent, prelude::*};
 use leptos_router::{components::A, hooks::use_navigate};
 use supp_shared::DocId;
 
-use crate::repo::Repo;
+use crate::{repo::Repo, session::PageHeader};
 
 #[component]
 pub fn Overview() -> impl IntoView {
@@ -18,9 +18,9 @@ pub fn Overview() -> impl IntoView {
     };
 
     view! {
-        <header>
+        <PageHeader>
             <h1>"Lists"</h1>
-        </header>
+        </PageHeader>
         <ul class="lists">
             <For each=move || repo.lists().get() key=|id| *id let(id)>
                 <ListLink id />
@@ -56,11 +56,23 @@ fn ListLink(id: DocId) -> impl IntoView {
             })
         })
     };
+    let done_share = move || {
+        list.map(|l| {
+            l.with(|l| {
+                let done = l.items.values().filter(|i| i.done).count();
+                let total = l.items.len().max(1);
+                format!("width: {}%", done * 100 / total)
+            })
+        })
+    };
     view! {
         <li>
             <A href=format!("/lists/{id}")>
                 <span class="title">{title}</span>
                 <span class="progress">{progress}</span>
+                <span class="bar" aria-hidden="true">
+                    <span style=done_share></span>
+                </span>
             </A>
         </li>
     }
