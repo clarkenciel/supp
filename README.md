@@ -55,6 +55,19 @@ Put it behind a TLS-terminating proxy (e.g. Caddy). In the Google Cloud
 console, create an OAuth client of type "Web application" with the
 redirect URI `https://lists.example.com/auth/callback`.
 
+Or as a container: `Containerfile` builds a ~25 MB `FROM scratch` image
+holding a static (musl) `supp` and the built client, running as an
+unprivileged user with the database on a `/data` volume:
+
+```sh
+docker build -t supp -f Containerfile .      # or: podman build -t supp .
+docker run -d -p 3000:3000 -v supp-data:/data \
+  -e SUPP_PUBLIC_URL=https://lists.example.com -e SUPP_AUTH=google \
+  -e SUPP_GOOGLE_CLIENT_ID=... -e SUPP_GOOGLE_CLIENT_SECRET=... supp
+docker run --rm -v supp-data:/data supp admin invite create \
+  --public-url https://lists.example.com
+```
+
 Admin, over SSH on the box (same `SUPP_DB`):
 
 ```sh
