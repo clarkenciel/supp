@@ -467,15 +467,6 @@ dialog.add-sheet::backdrop { background: rgb(12 10 9 / 0.45); }
 .notice button { align-self: flex-start; }
 .notice .actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 
-button.link {
-  background: none;
-  border: none;
-  box-shadow: none;
-  font-weight: 400;
-  color: var(--accent);
-  padding: 0;
-  text-decoration: underline;
-}
 
 .sync-status { color: var(--muted); }
 .sync-status[data-status="Offline"] { color: var(--danger); }

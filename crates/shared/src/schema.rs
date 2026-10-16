@@ -35,6 +35,16 @@ pub struct Item {
 }
 
 impl ListDoc {
+    /// The name to show for the list: its title, or "Untitled" before it
+    /// has one.
+    pub fn display_title(&self) -> String {
+        if self.title.is_empty() {
+            "Untitled".to_string()
+        } else {
+            self.title.clone()
+        }
+    }
+
     /// Items in display order: by position, with ties broken by ID. Ties
     /// happen when two peers insert at the same spot concurrently.
     pub fn ordered(&self) -> Vec<(&str, &Item)> {
@@ -97,6 +107,14 @@ mod tests {
             done: false,
             position: position.into(),
         }
+    }
+
+    #[test]
+    fn untitled_lists_have_a_display_title() {
+        let mut list = ListDoc::default();
+        assert_eq!(list.display_title(), "Untitled");
+        list.title = "Groceries".into();
+        assert_eq!(list.display_title(), "Groceries");
     }
 
     fn sync(a: &mut AutoCommit, b: &mut AutoCommit) {

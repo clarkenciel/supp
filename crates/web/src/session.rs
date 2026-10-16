@@ -138,6 +138,31 @@ pub async fn sign_out(repo: Repo) -> Result<(), String> {
     Ok(())
 }
 
+/// The account UI's state: one copy for the whole app, provided by `App`,
+/// so it outlives any one page header. A page swaps its header (a list
+/// going from "Loading…" to ready) and navigation mounts a new one; neither
+/// may forget an open panel, an update under way or an error.
+#[derive(Clone, Copy)]
+pub struct AccountUi {
+    /// Whether the account panel is open.
+    pub open: RwSignal<bool>,
+    /// Whether the app is reloading into a new version.
+    pub updating: RwSignal<bool>,
+    /// The last account action that failed (signing out, erasing lists),
+    /// shown in the notices until the next attempt.
+    pub problem: RwSignal<Option<String>>,
+}
+
+impl AccountUi {
+    pub fn new() -> Self {
+        Self {
+            open: RwSignal::new(false),
+            updating: RwSignal::new(false),
+            problem: RwSignal::new(None),
+        }
+    }
+}
+
 /// What the account icon's badge says, most urgent first.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Badge {
@@ -160,16 +185,18 @@ pub fn AccountMenu() -> impl IntoView {
     let session = expect_context::<RwSignal<Session>>();
     let status = expect_context::<RwSignal<SyncStatus>>();
     let new_version = expect_context::<NewVersion>().0;
-    let (open, set_open) = signal(false);
+    let ui = expect_context::<AccountUi>();
+    let open = ui.open;
     let on_key = window_event_listener(leptos::ev::keydown, move |ev| {
         if ev.key() == "Escape" {
-            set_open.set(false);
+            open.set(false);
         }
     });
     on_cleanup(move || on_key.remove());
 
     let badge = Memo::new(move |_| {
-        let attention = new_version.get() || repo.storage_closed().get();
+        let attention =
+            new_version.get() || repo.storage_closed().get() || ui.problem.with(Option::is_some);
         match session.get() {
             Session::Anonymous if attention => Badge::Attention,
             Session::Anonymous => Badge::Local,
@@ -195,14 +222,18 @@ pub fn AccountMenu() -> impl IntoView {
         };
         format!("Account: {state}")
     };
+    // Nobody signed in: no initial, and the icon is the device instead.
     let initial = Signal::derive(move || match session.get() {
-        Session::SignedIn(me) | Session::Expired(me) | Session::Mismatch { current: me, .. } => me
-            .name
-            .chars()
-            .next()
-            .map(|c| c.to_uppercase().to_string())
-            .unwrap_or_default(),
-        Session::Anonymous => String::new(),
+        Session::SignedIn(me) | Session::Expired(me) | Session::Mismatch { current: me, .. } => {
+            Some(
+                me.name
+                    .chars()
+                    .next()
+                    .map(|c| c.to_uppercase().to_string())
+                    .unwrap_or_default(),
+            )
+        }
+        Session::Anonymous => None,
     });
 
     view! {
@@ -212,37 +243,45 @@ pub fn AccountMenu() -> impl IntoView {
                 aria-label=label
                 aria-expanded=move || open.get().to_string()
                 aria-controls="account-panel"
-                on:click=move |_| set_open.update(|o| *o = !*o)
+                on:click=move |_| open.update(|o| *o = !*o)
             >
                 <AccountGlyph badge=badge.into() initial />
             </button>
             <Show when=move || open.get()>
-                <div class="account-scrim" on:click=move |_| set_open.set(false)></div>
+                <div class="account-scrim" on:click=move |_| open.set(false)></div>
             </Show>
-            <AccountPanel open />
+            <AccountPanel />
         </div>
     }
 }
 
-/// The account icon's drawing: an avatar ring with the person's initial
-/// (a phone outline when nobody is signed in), and the badge for `badge`.
+/// The account icon's drawing: the avatar ring with the person's initial,
+/// or a phone outline when nobody is signed in, plus the mark for `badge`.
+/// The two are independent, so a device with nobody signed in still shows
+/// the phone when it needs attention.
 #[component]
-fn AccountGlyph(badge: Signal<Badge>, initial: Signal<String>) -> impl IntoView {
+fn AccountGlyph(badge: Signal<Badge>, initial: Signal<Option<String>>) -> impl IntoView {
     view! {
         <svg viewBox="0 0 40 40" aria-hidden="true" data-badge=move || format!("{:?}", badge.get())>
-            {move || match badge.get() {
-                Badge::Local => view! {
+            {move || match initial.get() {
+                None => view! {
                     <rect class="ink" x="13" y="8" width="14" height="24" rx="3" />
                     <path class="ink" d="M18 28h4" />
                 }
                 .into_any(),
-                b => view! {
-                    <circle class="ink" class:dashed=b == Badge::Connecting cx="18" cy="18" r="14" />
+                Some(initial) => view! {
+                    <circle
+                        class="ink"
+                        class:dashed=move || badge.get() == Badge::Connecting
+                        cx="18"
+                        cy="18"
+                        r="14"
+                    />
                     <text x="18" y="23" text-anchor="middle">{initial}</text>
-                    {badge_mark(b)}
                 }
                 .into_any(),
             }}
+            {move || badge_mark(badge.get())}
         </svg>
     }
 }
@@ -250,11 +289,11 @@ fn AccountGlyph(badge: Signal<Badge>, initial: Signal<String>) -> impl IntoView 
 /// What the account icon opens onto: who is signed in, how syncing is
 /// going in words, and signing in or out.
 #[component]
-fn AccountPanel(open: ReadSignal<bool>) -> impl IntoView {
+fn AccountPanel() -> impl IntoView {
     let repo = expect_context::<Repo>();
     let session = expect_context::<RwSignal<Session>>();
     let status = expect_context::<RwSignal<SyncStatus>>();
-    let (problem, set_problem) = signal(None::<String>);
+    let ui = expect_context::<AccountUi>();
     let status_text = move || match status.get() {
         SyncStatus::Idle => "",
         SyncStatus::Connecting => "Connecting…",
@@ -262,19 +301,22 @@ fn AccountPanel(open: ReadSignal<bool>) -> impl IntoView {
         SyncStatus::Offline => "Offline: changes are saved on this device",
         SyncStatus::UpgradeRequired => "",
     };
+    // A failure goes to the notices, which stay in view after the panel
+    // closes.
     let do_sign_out = move |_| {
+        ui.problem.set(None);
         spawn_local(async move {
             match sign_out(repo).await {
                 Ok(()) => {
                     let _ = window().location().assign("/");
                 }
-                Err(err) => set_problem.set(Some(err)),
+                Err(err) => ui.problem.set(Some(err)),
             }
         })
     };
 
     view! {
-        <div id="account-panel" class="account-panel" hidden=move || !open.get()>
+        <div id="account-panel" class="account-panel" hidden=move || !ui.open.get()>
             {move || match session.get() {
                 Session::Anonymous => view! {
                     <p class="muted">"Lists are stored on this device only."</p>
@@ -297,7 +339,6 @@ fn AccountPanel(open: ReadSignal<bool>) -> impl IntoView {
                 }
                 .into_any(),
             }}
-            {move || problem.get().map(|p| view! { <ErrorStatus>{p}</ErrorStatus> })}
         </div>
     }
 }
@@ -333,15 +374,17 @@ fn badge_mark(badge: Badge) -> impl IntoView {
 }
 
 /// Notes that need the person's attention, under the page header: an
-/// ended session, someone else's lists on this device, a new version.
+/// ended session, someone else's lists on this device, a new version, or
+/// an account action that failed.
 #[component]
 pub fn Notices() -> impl IntoView {
     let repo = expect_context::<Repo>();
     let session = expect_context::<RwSignal<Session>>();
     let status = expect_context::<RwSignal<SyncStatus>>();
     let new_version = expect_context::<NewVersion>().0;
-    let (problem, set_problem) = signal(None::<String>);
-    let (updating, set_updating) = signal(false);
+    let AccountUi {
+        updating, problem, ..
+    } = expect_context::<AccountUi>();
 
     let keep = move |current: Me| {
         move |_| {
@@ -352,9 +395,10 @@ pub fn Notices() -> impl IntoView {
     let erase = move |current: Me| {
         move |_| {
             let current = current.clone();
+            problem.set(None);
             spawn_local(async move {
                 if let Err(err) = repo.erase_all().await {
-                    set_problem.set(Some(err.to_string()));
+                    problem.set(Some(err.to_string()));
                     return;
                 }
                 session.set(adopt(repo, current).await);
@@ -416,7 +460,7 @@ pub fn Notices() -> impl IntoView {
                                 <button
                                     disabled=updating
                                     on:click=move |_| {
-                                        set_updating.set(true);
+                                        updating.set(true);
                                         spawn_local(pwa::update_and_reload());
                                     }
                                 >

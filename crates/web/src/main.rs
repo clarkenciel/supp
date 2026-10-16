@@ -15,11 +15,11 @@ use leptos_router::{
 };
 
 use crate::{
-    list_page::ListPage,
+    list_page::{BareHeader, ListPage},
     overview::Overview,
     pwa::NewVersion,
     repo::Repo,
-    session::{Session, SessionChecked},
+    session::{AccountUi, Session, SessionChecked},
     sync::SyncStatus,
 };
 use supp_ui::{ErrorStatus, Status};
@@ -69,6 +69,7 @@ fn App(repo: Repo, session: Session) -> impl IntoView {
     provide_context(status);
     provide_context(new_version);
     provide_context(checked);
+    provide_context(AccountUi::new());
     leptos::task::spawn_local(pwa::watch_for_updates(new_version.0));
     leptos::task::spawn_local(async move {
         session::resolve(repo, session).await;
@@ -79,7 +80,12 @@ fn App(repo: Repo, session: Session) -> impl IntoView {
     view! {
         <main>
             <Router>
-                <Routes fallback=|| view! { <Status>"Not found."</Status> }>
+                <Routes fallback=|| {
+                    view! {
+                        <BareHeader />
+                        <Status>"Not found."</Status>
+                    }
+                }>
                     <Route path=path!("/") view=Overview />
                     <Route path=path!("/lists/:id") view=ListPage />
                 </Routes>

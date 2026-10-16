@@ -115,20 +115,13 @@ fn AddSheet(
     let repo = expect_context::<Repo>();
     let (draft, set_draft) = signal(String::new());
     let (added, set_added) = signal(None::<String>);
+    let pressed_outside = StoredValue::new(false);
     let close = move || {
         if let Some(sheet) = sheet.get() {
             sheet.close();
         }
     };
-    let list_name = move || {
-        list.with(|l| {
-            if l.title.is_empty() {
-                "Untitled".to_string()
-            } else {
-                l.title.clone()
-            }
-        })
-    };
+    let list_name = move || list.with(ListDoc::display_title);
     let add = move |ev: SubmitEvent| {
         ev.prevent_default();
         let text = draft.get_untracked().trim().to_string();
@@ -153,14 +146,17 @@ fn AddSheet(
             class="add-sheet"
             node_ref=sheet
             aria-labelledby="add-title"
-            // Each opening starts afresh.
-            on:close=move |_| set_added.set(None)
+            // Each opening starts afresh: nothing typed, nothing added.
+            on:close=move |_| {
+                set_added.set(None);
+                set_draft.set(String::new());
+            }
+            // A tap on the backdrop closes the sheet: one that starts and
+            // ends outside the sheet's box. Taps on its own padding, and
+            // drags (selecting text) that start inside, don't count.
+            on:pointerdown=move |ev| pressed_outside.set_value(outside(sheet, &ev))
             on:click=move |ev| {
-                // A click on the dialog itself, not its contents, is the backdrop.
-                let on_backdrop = ev
-                    .target()
-                    .is_some_and(|t| t.unchecked_into::<Element>().tag_name() == "DIALOG");
-                if on_backdrop {
+                if pressed_outside.get_value() && outside(sheet, &ev) {
                     close();
                 }
             }
@@ -194,9 +190,20 @@ fn AddSheet(
     }
 }
 
-/// The header for a list that can't be shown: just the way back.
+/// Whether a pointer event fell outside `sheet`'s box, on its backdrop.
+fn outside(sheet: NodeRef<leptos::html::Dialog>, ev: &ev::MouseEvent) -> bool {
+    let Some(sheet) = sheet.get_untracked() else {
+        return false;
+    };
+    let rect = sheet.get_bounding_client_rect();
+    let (x, y) = (f64::from(ev.client_x()), f64::from(ev.client_y()));
+    x < rect.left() || x > rect.right() || y < rect.top() || y > rect.bottom()
+}
+
+/// A header with just the way back to all lists, for pages with nothing
+/// else to show: a list that can't be shown, or an unknown address.
 #[component]
-fn BareHeader() -> impl IntoView {
+pub fn BareHeader() -> impl IntoView {
     view! {
         <PageHeader>
             <A href="/" attr:class="back" attr:aria-label="All lists">"‹"</A>

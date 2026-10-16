@@ -110,11 +110,12 @@ test('moves an item from anywhere in a long list to either end', async ({ page }
     const below = [...document.querySelectorAll('.gutter')]
       .map((g) => g.getBoundingClientRect())
       .find((r) => r.top > sheet.top);
+    if (!below) return 'no drop target below the sheet to scroll under it';
     scrollBy(0, below.top + below.height / 2 - (sheet.top + sheet.height / 2));
     const hits = [];
     for (let y = sheet.top + 2; y < sheet.bottom; y += 4) {
       for (let x = sheet.left + 10; x < sheet.right; x += 20) {
-        hits.push(document.elementFromPoint(x, y).closest('.mover') !== null);
+        hits.push(document.elementFromPoint(x, y)?.closest('.mover') != null);
       }
     }
     return hits.every(Boolean);
@@ -129,6 +130,33 @@ test('moves an item from anywhere in a long list to either end', async ({ page }
   await page.mouse.wheel(0, 5000);
   await gap('Move to the end').click();
   await expect(items(page).last()).toHaveValue('item 2');
+});
+
+test('the add sheet closes only from outside it, and forgets abandoned text', async ({ page }) => {
+  await createList(page, 'Sheet');
+  const sheet = page.locator('dialog.add-sheet');
+  await page.getByRole('button', { name: 'Add item' }).click();
+  await page.getByLabel('New item').fill('eggs');
+
+  // Taps on the sheet's own padding don't close it.
+  const box = await sheet.boundingBox();
+  await page.mouse.click(box.x + 4, box.y + box.height - 4);
+  await expect(sheet).toBeVisible();
+  // A tap on the backdrop does.
+  await page.mouse.click(box.x + box.width / 2, box.y - 40);
+  await expect(sheet).toBeHidden();
+
+  // What was typed and left doesn't come back.
+  await page.getByRole('button', { name: 'Add item' }).click();
+  await expect(page.getByLabel('New item')).toHaveValue('');
+});
+
+test('an unknown address still has the title bar', async ({ page }) => {
+  await page.goto('/no/such/page');
+  await expect(page.getByText('Not found.')).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Account:/ })).toBeVisible();
+  await page.getByRole('link', { name: 'All lists' }).click();
+  await expect(page.getByLabel('New list title')).toBeVisible();
 });
 
 test('keeps working when the network goes away', async ({ page, context }) => {
