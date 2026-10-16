@@ -10,6 +10,7 @@ use supp_shared::{
     DocId,
     schema::{Item, ListDoc},
 };
+use supp_ui::{Pebble, Status};
 use wasm_bindgen::JsCast;
 use web_sys::{Element, FocusOptions, HtmlElement};
 
@@ -57,29 +58,26 @@ pub fn ListPage() -> impl IntoView {
         }
         None if loading() => view! {
             <BareHeader />
-            <p class="status" role="status">"Loading…"</p>
+            <Status live=true>"Loading…"</Status>
         }
         .into_any(),
         None if local.get().is_some() => view! {
             <BareHeader />
-            <p class="status">
+            <Status>
                 "This list hasn't downloaded to this device yet. "
                 "It will once you're online and signed in. " <A href="/">"All lists"</A>
-            </p>
+            </Status>
         }
         .into_any(),
         None => view! {
             <BareHeader />
-            <p class="status">
+            <Status>
                 "This list doesn't exist on this device. " <A href="/">"All lists"</A>
-            </p>
+            </Status>
         }
         .into_any(),
     }
 }
-
-/// The add button's shape: a hand-drawn Memphis pebble.
-const PEBBLE: &str = "M14 20C19 8 40 5 50 12C60 19 60 38 52 48C44 58 22 59 13 50C5 42 9 30 14 20Z";
 
 /// The header for a list that can't be shown: just the way back.
 #[component]
@@ -218,11 +216,9 @@ fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
         </ul>
         <Show when=move || mover.moving.get().is_none()>
             <button class="fab" aria-label="Add item" aria-haspopup="dialog" on:click=open_add>
-                <svg viewBox="0 0 64 64" aria-hidden="true">
-                    <path class="shadow" transform="translate(4 4)" d=PEBBLE />
-                    <path class="face" d=PEBBLE />
-                    <path class="plus" d="M32 22v20M22 32h20" />
-                </svg>
+                <Pebble>
+                    <path class="glyph" d="M32 22v20M22 32h20" />
+                </Pebble>
             </button>
         </Show>
         <dialog
@@ -435,7 +431,8 @@ fn Gutter(mover: Mover, before: Option<String>) -> impl IntoView {
 }
 
 /// A chunky arrow pointing left into its gap.
-const ARROW: &str = "M3 13L15 4Q17 3 17 5L17 9L31 9Q34 9 34 12L34 14Q34 17 31 17L17 17L17 21Q17 23 15 22Z";
+const ARROW: &str =
+    "M3 13L15 4Q17 3 17 5L17 9L31 9Q34 9 34 12L34 14Q34 17 31 17L17 17L17 21Q17 23 15 22Z";
 
 /// Where an item would land in front of `before` (or at the end).
 struct Slot {

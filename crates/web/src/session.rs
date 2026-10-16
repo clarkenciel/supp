@@ -8,6 +8,8 @@ use leptos::{logging, prelude::*, task::spawn_local};
 use prost::Message as _;
 use supp_shared::proto::api::v1::Me;
 
+use supp_ui::{Notice, Status};
+
 use crate::{
     pwa::{self, NewVersion},
     repo::Repo,
@@ -159,7 +161,6 @@ pub fn AccountMenu() -> impl IntoView {
     let status = expect_context::<RwSignal<SyncStatus>>();
     let new_version = expect_context::<NewVersion>().0;
     let (open, set_open) = signal(false);
-    let (problem, set_problem) = signal(None::<String>);
     let on_key = window_event_listener(leptos::ev::keydown, move |ev| {
         if ev.key() == "Escape" {
             set_open.set(false);
@@ -167,7 +168,7 @@ pub fn AccountMenu() -> impl IntoView {
     });
     on_cleanup(move || on_key.remove());
 
-    let badge = move || {
+    let badge = Memo::new(move |_| {
         let attention = new_version.get() || repo.storage_closed().get();
         match session.get() {
             Session::Anonymous if attention => Badge::Attention,
@@ -182,16 +183,9 @@ pub fn AccountMenu() -> impl IntoView {
                 SyncStatus::Idle => Badge::None,
             },
         }
-    };
-    let status_text = move || match status.get() {
-        SyncStatus::Idle => "",
-        SyncStatus::Connecting => "Connecting…",
-        SyncStatus::Online => "Synced",
-        SyncStatus::Offline => "Offline: changes are saved on this device",
-        SyncStatus::UpgradeRequired => "",
-    };
+    });
     let label = move || {
-        let state = match badge() {
+        let state = match badge.get() {
             Badge::Local => "not signed in",
             Badge::Attention => "needs attention",
             Badge::Offline => "offline",
@@ -201,11 +195,72 @@ pub fn AccountMenu() -> impl IntoView {
         };
         format!("Account: {state}")
     };
-    let initial = move || match session.get() {
-        Session::SignedIn(me) | Session::Expired(me) | Session::Mismatch { current: me, .. } => {
-            me.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default()
-        }
+    let initial = Signal::derive(move || match session.get() {
+        Session::SignedIn(me) | Session::Expired(me) | Session::Mismatch { current: me, .. } => me
+            .name
+            .chars()
+            .next()
+            .map(|c| c.to_uppercase().to_string())
+            .unwrap_or_default(),
         Session::Anonymous => String::new(),
+    });
+
+    view! {
+        <div class="account">
+            <button
+                class="account-icon"
+                aria-label=label
+                aria-expanded=move || open.get().to_string()
+                aria-controls="account-panel"
+                on:click=move |_| set_open.update(|o| *o = !*o)
+            >
+                <AccountGlyph badge=badge.into() initial />
+            </button>
+            <Show when=move || open.get()>
+                <div class="account-scrim" on:click=move |_| set_open.set(false)></div>
+            </Show>
+            <AccountPanel open />
+        </div>
+    }
+}
+
+/// The account icon's drawing: an avatar ring with the person's initial
+/// (a phone outline when nobody is signed in), and the badge for `badge`.
+#[component]
+fn AccountGlyph(badge: Signal<Badge>, initial: Signal<String>) -> impl IntoView {
+    view! {
+        <svg viewBox="0 0 40 40" aria-hidden="true" data-badge=move || format!("{:?}", badge.get())>
+            {move || match badge.get() {
+                Badge::Local => view! {
+                    <rect class="ink" x="13" y="8" width="14" height="24" rx="3" />
+                    <path class="ink" d="M18 28h4" />
+                }
+                .into_any(),
+                b => view! {
+                    <circle class="ink" class:dashed=b == Badge::Connecting cx="18" cy="18" r="14" />
+                    <text x="18" y="23" text-anchor="middle">{initial}</text>
+                    {badge_mark(b)}
+                }
+                .into_any(),
+            }}
+        </svg>
+    }
+}
+
+/// What the account icon opens onto: who is signed in, how syncing is
+/// going in words, and signing in or out.
+#[component]
+fn AccountPanel(open: ReadSignal<bool>) -> impl IntoView {
+    let repo = expect_context::<Repo>();
+    let session = expect_context::<RwSignal<Session>>();
+    let status = expect_context::<RwSignal<SyncStatus>>();
+    let (problem, set_problem) = signal(None::<String>);
+    let status_text = move || match status.get() {
+        SyncStatus::Idle => "",
+        SyncStatus::Connecting => "Connecting…",
+        SyncStatus::Online => "Synced",
+        SyncStatus::Offline => "Offline: changes are saved on this device",
+        SyncStatus::UpgradeRequired => "",
     };
     let do_sign_out = move |_| {
         spawn_local(async move {
@@ -219,64 +274,30 @@ pub fn AccountMenu() -> impl IntoView {
     };
 
     view! {
-        <div class="account">
-            <button
-                class="account-icon"
-                aria-label=label
-                aria-expanded=move || open.get().to_string()
-                aria-controls="account-panel"
-                on:click=move |_| set_open.update(|o| *o = !*o)
-            >
-                <svg viewBox="0 0 40 40" aria-hidden="true" data-badge=move || format!("{:?}", badge())>
-                    {move || match badge() {
-                        Badge::Local => view! {
-                            <rect class="ink" x="13" y="8" width="14" height="24" rx="3" />
-                            <path class="ink" d="M18 28h4" />
-                        }
-                        .into_any(),
-                        b => view! {
-                            <circle
-                                class="ink"
-                                class:dashed=b == Badge::Connecting
-                                cx="18"
-                                cy="18"
-                                r="14"
-                            />
-                            <text x="18" y="23" text-anchor="middle">{initial}</text>
-                            {badge_mark(b)}
-                        }
-                        .into_any(),
-                    }}
-                </svg>
-            </button>
-            <Show when=move || open.get()>
-                <div class="account-scrim" on:click=move |_| set_open.set(false)></div>
-            </Show>
-            <div id="account-panel" class="account-panel" hidden=move || !open.get()>
-                {move || match session.get() {
-                    Session::Anonymous => view! {
-                        <p class="muted">"Lists are stored on this device only."</p>
-                        <a class="button secondary" href="/auth/login" rel="external">
-                            "Sign in to sync"
-                        </a>
-                    }
-                    .into_any(),
-                    Session::SignedIn(me) => view! {
-                        <p class="who">{me.name}</p>
-                        <p class="sync-status" data-status=move || format!("{:?}", status.get())>
-                            {status_text}
-                        </p>
-                        <button class="secondary" on:click=do_sign_out>"Sign out"</button>
-                    }
-                    .into_any(),
-                    Session::Expired(me) | Session::Mismatch { current: me, .. } => view! {
-                        <p class="who">{me.name}</p>
-                        <p class="muted">"See the note under the header."</p>
-                    }
-                    .into_any(),
-                }}
-                {move || problem.get().map(|p| view! { <p class="status error" role="alert">{p}</p> })}
-            </div>
+        <div id="account-panel" class="account-panel" hidden=move || !open.get()>
+            {move || match session.get() {
+                Session::Anonymous => view! {
+                    <p class="muted">"Lists are stored on this device only."</p>
+                    <a class="button secondary" href="/auth/login" rel="external">
+                        "Sign in to sync"
+                    </a>
+                }
+                .into_any(),
+                Session::SignedIn(me) => view! {
+                    <p class="who">{me.name}</p>
+                    <p class="sync-status" data-status=move || format!("{:?}", status.get())>
+                        {status_text}
+                    </p>
+                    <button class="secondary" on:click=do_sign_out>"Sign out"</button>
+                }
+                .into_any(),
+                Session::Expired(me) | Session::Mismatch { current: me, .. } => view! {
+                    <p class="who">{me.name}</p>
+                    <p class="muted">"See the note under the header."</p>
+                }
+                .into_any(),
+            }}
+            {move || problem.get().map(|p| view! { <Status error=true>{p}</Status> })}
         </div>
     }
 }
@@ -346,20 +367,20 @@ pub fn Notices() -> impl IntoView {
             {move || match session.get() {
                 Session::Expired(me) => Some(
                     view! {
-                        <div class="notice" role="status">
+                        <Notice>
                             <p>
                                 "Signed out of " {me.email} ". Your changes are kept on this device."
                             </p>
                             <a class="button secondary" href="/auth/login" rel="external">
                                 "Sign in to resume syncing"
                             </a>
-                        </div>
+                        </Notice>
                     }
                     .into_any(),
                 ),
                 Session::Mismatch { previous, current } => Some(
                     view! {
-                        <div class="notice" role="status">
+                        <Notice>
                             <p>
                                 "This device has lists from " {previous.email.clone()}
                                 ". You are signed in as " {current.email.clone()} "."
@@ -370,7 +391,7 @@ pub fn Notices() -> impl IntoView {
                                 </button>
                                 <button class="danger" on:click=erase(current)>"Erase them"</button>
                             </div>
-                        </div>
+                        </Notice>
                     }
                     .into_any(),
                 ),
@@ -390,7 +411,7 @@ pub fn Notices() -> impl IntoView {
                             "A new version of the app is available."
                         };
                         view! {
-                            <div class="notice" role="status">
+                            <Notice>
                                 <p>{text}</p>
                                 <button
                                     disabled=updating
@@ -401,11 +422,11 @@ pub fn Notices() -> impl IntoView {
                                 >
                                     {move || if updating.get() { "Updating…" } else { "Reload" }}
                                 </button>
-                            </div>
+                            </Notice>
                         }
                     })
             }}
-            {move || problem.get().map(|p| view! { <p class="status error" role="alert">{p}</p> })}
+            {move || problem.get().map(|p| view! { <Status error=true>{p}</Status> })}
         </div>
     }
 }

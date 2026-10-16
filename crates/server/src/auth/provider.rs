@@ -4,7 +4,9 @@
 //! provider (local testing) are interchangeable. CSRF protection (`state`)
 //! is handled by the routes, not by each provider.
 
+use leptos::prelude::*;
 use std::collections::HashMap;
+use supp_ui::Notice;
 
 use futures_util::future::BoxFuture;
 
@@ -99,15 +101,32 @@ pub fn dev_sign_in_page(state: &str) -> String {
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
         .collect();
-    let body = format!(
-        r#"<div class="notice"><p>Development identity provider. Any name signs in as <code>dev:&lt;name&gt;</code>.</p></div>
-  <form class="auth-form" action="/auth/callback" method="get">
-    <input type="hidden" name="state" value="{state}">
-    <label>Name <input name="code" type="text" pattern="[A-Za-z0-9]+" autocomplete="username" required autofocus></label>
-    <button type="submit">Sign in</button>
-  </form>"#
-    );
-    super::page::page("Sign in", &body)
+    super::page::page(
+        "Sign in",
+        view! {
+            <Notice>
+                <p>
+                    "Development identity provider. Any name signs in as "
+                    <code>"dev:<name>"</code> "."
+                </p>
+            </Notice>
+            <form class="auth-form" action="/auth/callback" method="get">
+                <input type="hidden" name="state" value=state />
+                <label>
+                    "Name"
+                    <input
+                        name="code"
+                        type="text"
+                        pattern="[A-Za-z0-9]+"
+                        autocomplete="username"
+                        required
+                        autofocus
+                    />
+                </label>
+                <button type="submit">"Sign in"</button>
+            </form>
+        },
+    )
 }
 
 #[cfg(test)]

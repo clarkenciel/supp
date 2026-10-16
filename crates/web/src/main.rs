@@ -22,6 +22,7 @@ use crate::{
     session::{Session, SessionChecked},
     sync::SyncStatus,
 };
+use supp_ui::Status;
 
 fn main() {
     console_error_panic_hook::set_once();
@@ -48,7 +49,7 @@ fn main() {
                 leptos::mount::mount_to_body(move || {
                     view! {
                         <main>
-                            <p class="status error">"Could not open local storage: " {err}</p>
+                            <Status error=true>"Could not open local storage: " {err}</Status>
                         </main>
                     }
                 })
@@ -78,7 +79,7 @@ fn App(repo: Repo, session: Session) -> impl IntoView {
     view! {
         <main>
             <Router>
-                <Routes fallback=|| view! { <p class="status">"Not found."</p> }>
+                <Routes fallback=|| view! { <Status>"Not found."</Status> }>
                     <Route path=path!("/") view=Overview />
                     <Route path=path!("/lists/:id") view=ListPage />
                 </Routes>
