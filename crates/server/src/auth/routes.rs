@@ -8,7 +8,9 @@
 //!   cookie.
 //! - `POST /auth/logout` ends the session; `GET /api/me` reports the user.
 
+use leptos::prelude::*;
 use std::collections::HashMap;
+use supp_ui::AlertNotice;
 
 use axum::{
     extract::{Path, Query, State},
@@ -197,16 +199,18 @@ pub async fn dev_sign_in(Query(params): Query<HashMap<String, String>>) -> Html<
 }
 
 fn error_page(status: StatusCode, message: &str) -> Response {
-    let message = message
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;");
-    let body = format!(
-        "<!doctype html><meta charset=\"utf-8\">\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
-         <title>Sign-in problem</title><p>{message}</p><p><a href=\"/\">Back to your lists</a></p>"
-    );
-    (status, Html(body)).into_response()
+    let message = message.to_string();
+    let body = view! {
+        <AlertNotice>
+            <p>{message}</p>
+        </AlertNotice>
+        <a class="button secondary" href="/">"Back to your lists"</a>
+    };
+    (
+        status,
+        Html(super::page::page("Couldn't sign you in", body)),
+    )
+        .into_response()
 }
 
 fn time_secs(secs: i64) -> time::Duration {

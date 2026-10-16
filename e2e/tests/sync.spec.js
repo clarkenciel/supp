@@ -2,7 +2,7 @@
 // context is a separate device.
 const { test, expect } = require('@playwright/test');
 const {
-  admin, invite, userId, uniqueName, signIn, expectItems, createList, addItem,
+  admin, invite, userId, uniqueName, signIn, expectItems, createList, addItem, openAccount,
 } = require('./helpers');
 
 const lists = (page) => page.locator('ul.lists li');
@@ -83,7 +83,10 @@ test('signing out erases the lists on this device only', async ({ browser }) => 
   await signIn(page, invite(), name);
   await createList(page, 'Private');
   await page.goto('/');
+  await openAccount(page);
   await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page.getByRole('button', { name: 'Account: not signed in' })).toBeVisible();
+  await openAccount(page);
   await expect(page.getByText('Lists are stored on this device only.')).toBeVisible();
   await expect(lists(page)).toHaveCount(0);
 

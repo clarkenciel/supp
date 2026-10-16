@@ -1,6 +1,7 @@
 //! Authentication: identity providers, login routes and sessions.
 
 pub mod google;
+mod page;
 pub mod provider;
 pub mod routes;
 pub mod session;

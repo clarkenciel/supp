@@ -10,12 +10,13 @@ use supp_shared::{
     DocId,
     schema::{Item, ListDoc},
 };
+use supp_ui::{LiveStatus, Pebble, Status};
 use wasm_bindgen::JsCast;
 use web_sys::{Element, FocusOptions, HtmlElement};
 
 use crate::{
     repo::Repo,
-    session::{Session, SessionChecked},
+    session::{PageHeader, Session, SessionChecked},
     share::SharePanel,
     sync::SyncStatus,
 };
@@ -55,36 +56,79 @@ pub fn ListPage() -> impl IntoView {
             let list = repo.list(id).expect("ready lists are local");
             view! { <ListView id list /> }.into_any()
         }
-        None if loading() => view! { <p class="status" role="status">"Loading…"</p> }.into_any(),
+        None if loading() => view! {
+            <BareHeader />
+            <LiveStatus>"Loading…"</LiveStatus>
+        }
+        .into_any(),
         None if local.get().is_some() => view! {
-            <p class="status">
+            <BareHeader />
+            <Status>
                 "This list hasn't downloaded to this device yet. "
                 "It will once you're online and signed in. " <A href="/">"All lists"</A>
-            </p>
+            </Status>
         }
         .into_any(),
         None => view! {
-            <p class="status">
+            <BareHeader />
+            <Status>
                 "This list doesn't exist on this device. " <A href="/">"All lists"</A>
-            </p>
+            </Status>
         }
         .into_any(),
     }
 }
 
+/// Adding items: the floating pebble button and the sheet it opens. The
+/// button is `hidden` while an item is being moved, when the mover sheet
+/// has the bottom edge.
 #[component]
-fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
-    let repo = expect_context::<Repo>();
-    let navigate = use_navigate();
-    let (draft, set_draft) = signal(String::new());
-    let (sharing, set_sharing) = signal(false);
+fn AddItem(id: DocId, list: Signal<ListDoc>, hidden: Signal<bool>) -> impl IntoView {
+    let sheet = NodeRef::<leptos::html::Dialog>::new();
+    let open = move |_| {
+        if let Some(sheet) = sheet.get() {
+            let _ = sheet.show_modal();
+        }
+    };
+    view! {
+        <Show when=move || !hidden.get()>
+            <button class="fab" aria-label="Add item" aria-haspopup="dialog" on:click=open>
+                <Pebble>
+                    <path class="glyph" d="M32 22v20M22 32h20" />
+                </Pebble>
+            </button>
+        </Show>
+        <AddSheet id list sheet />
+    }
+}
 
+/// A modal sheet for adding items to the end of the list. It stays open
+/// after each one, saying what was added, so several can go in a row; Done,
+/// Escape or a tap on the backdrop closes it.
+#[component]
+fn AddSheet(
+    id: DocId,
+    list: Signal<ListDoc>,
+    /// The `<dialog>`, for whoever opens it.
+    sheet: NodeRef<leptos::html::Dialog>,
+) -> impl IntoView {
+    let repo = expect_context::<Repo>();
+    let (draft, set_draft) = signal(String::new());
+    let (added, set_added) = signal(None::<String>);
+    let pressed_outside = StoredValue::new(false);
+    let close = move || {
+        if let Some(sheet) = sheet.get() {
+            sheet.close();
+        }
+    };
+    let list_name = move || list.with(ListDoc::display_title);
     let add = move |ev: SubmitEvent| {
         ev.prevent_default();
         let text = draft.get_untracked().trim().to_string();
         if text.is_empty() {
             return;
         }
+        set_added.set(Some(text.clone()));
         repo.change(id, |l| {
             let position = l.position_at(l.items.len(), None);
             let item = Item {
@@ -97,6 +141,82 @@ fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
         set_draft.set(String::new());
     };
 
+    view! {
+        <dialog
+            class="add-sheet"
+            node_ref=sheet
+            aria-labelledby="add-title"
+            // Each opening starts afresh: nothing typed, nothing added.
+            on:close=move |_| {
+                set_added.set(None);
+                set_draft.set(String::new());
+            }
+            // A tap on the backdrop closes the sheet: one that starts and
+            // ends outside the sheet's box. Taps on its own padding, and
+            // drags (selecting text) that start inside, don't count.
+            on:pointerdown=move |ev| pressed_outside.set_value(outside(sheet, &ev))
+            on:click=move |ev| {
+                if pressed_outside.get_value() && outside(sheet, &ev) {
+                    close();
+                }
+            }
+        >
+            <form class="add" on:submit=add>
+                <div class="add-head">
+                    <h2 id="add-title">"Add to " {list_name}</h2>
+                    <p class="hint" role="status">
+                        {move || added.get().map(|t| format!("Added “{t}”"))}
+                    </p>
+                </div>
+                <div class="add-row">
+                    <input
+                        type="text"
+                        placeholder="Item"
+                        aria-label="New item"
+                        autofocus
+                        prop:value=draft
+                        on:input=move |ev| set_draft.set(event_target_value(&ev))
+                    />
+                    <button type="submit">"Add"</button>
+                </div>
+                <div class="add-foot">
+                    <p class="hint">"Stays open so you can keep adding."</p>
+                    <button type="button" class="secondary" on:click=move |_| close()>
+                        "Done"
+                    </button>
+                </div>
+            </form>
+        </dialog>
+    }
+}
+
+/// Whether a pointer event fell outside `sheet`'s box, on its backdrop.
+fn outside(sheet: NodeRef<leptos::html::Dialog>, ev: &ev::MouseEvent) -> bool {
+    let Some(sheet) = sheet.get_untracked() else {
+        return false;
+    };
+    let rect = sheet.get_bounding_client_rect();
+    let (x, y) = (f64::from(ev.client_x()), f64::from(ev.client_y()));
+    x < rect.left() || x > rect.right() || y < rect.top() || y > rect.bottom()
+}
+
+/// A header with just the way back to all lists, for pages with nothing
+/// else to show: a list that can't be shown, or an unknown address.
+#[component]
+pub fn BareHeader() -> impl IntoView {
+    view! {
+        <PageHeader>
+            <A href="/" attr:class="back" attr:aria-label="All lists">"‹"</A>
+            <span class="spacer"></span>
+        </PageHeader>
+    }
+}
+
+#[component]
+fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
+    let repo = expect_context::<Repo>();
+    let navigate = use_navigate();
+    let (sharing, set_sharing) = signal(false);
     let delete_list = move |_| {
         let confirmed = window()
             .confirm_with_message("Delete this list from this device?")
@@ -139,7 +259,7 @@ fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
     };
 
     view! {
-        <header>
+        <PageHeader>
             <A href="/" attr:class="back" attr:aria-label="All lists">"‹"</A>
             <input
                 class="list-title"
@@ -159,7 +279,7 @@ fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
             >
                 "Share"
             </button>
-        </header>
+        </PageHeader>
         <Show when=move || sharing.get()>
             <SharePanel id />
         </Show>
@@ -173,16 +293,7 @@ fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
                 </li>
             </Show>
         </ul>
-        <form class="add" on:submit=add>
-            <input
-                type="text"
-                placeholder="Add item"
-                aria-label="New item"
-                prop:value=draft
-                on:input=move |ev| set_draft.set(event_target_value(&ev))
-            />
-            <button type="submit">"Add"</button>
-        </form>
+        <AddItem id list hidden=Signal::derive(move || mover.moving.get().is_some()) />
         <footer>
             <Show when=any_done>
                 <button
@@ -353,7 +464,8 @@ fn Gutter(mover: Mover, before: Option<String>) -> impl IntoView {
 }
 
 /// A chunky arrow pointing left into its gap.
-const ARROW: &str = "M3 13L15 4Q17 3 17 5L17 9L31 9Q34 9 34 12L34 14Q34 17 31 17L17 17L17 21Q17 23 15 22Z";
+const ARROW: &str =
+    "M3 13L15 4Q17 3 17 5L17 9L31 9Q34 9 34 12L34 14Q34 17 31 17L17 17L17 21Q17 23 15 22Z";
 
 /// Where an item would land in front of `before` (or at the end).
 struct Slot {

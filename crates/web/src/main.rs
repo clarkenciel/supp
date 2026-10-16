@@ -15,13 +15,14 @@ use leptos_router::{
 };
 
 use crate::{
-    list_page::ListPage,
+    list_page::{BareHeader, ListPage},
     overview::Overview,
     pwa::NewVersion,
     repo::Repo,
-    session::{AccountBar, Session, SessionChecked},
+    session::{AccountUi, Session, SessionChecked},
     sync::SyncStatus,
 };
+use supp_ui::{ErrorStatus, Status};
 
 fn main() {
     console_error_panic_hook::set_once();
@@ -48,7 +49,7 @@ fn main() {
                 leptos::mount::mount_to_body(move || {
                     view! {
                         <main>
-                            <p class="status error">"Could not open local storage: " {err}</p>
+                            <ErrorStatus>"Could not open local storage: " {err}</ErrorStatus>
                         </main>
                     }
                 })
@@ -68,6 +69,7 @@ fn App(repo: Repo, session: Session) -> impl IntoView {
     provide_context(status);
     provide_context(new_version);
     provide_context(checked);
+    provide_context(AccountUi::new());
     leptos::task::spawn_local(pwa::watch_for_updates(new_version.0));
     leptos::task::spawn_local(async move {
         session::resolve(repo, session).await;
@@ -77,9 +79,13 @@ fn App(repo: Repo, session: Session) -> impl IntoView {
     sync::run_while_signed_in(repo, session, status);
     view! {
         <main>
-            <AccountBar />
             <Router>
-                <Routes fallback=|| view! { <p class="status">"Not found."</p> }>
+                <Routes fallback=|| {
+                    view! {
+                        <BareHeader />
+                        <Status>"Not found."</Status>
+                    }
+                }>
                     <Route path=path!("/") view=Overview />
                     <Route path=path!("/lists/:id") view=ListPage />
                 </Routes>
