@@ -15,7 +15,7 @@ use web_sys::{Element, FocusOptions, HtmlElement};
 
 use crate::{
     repo::Repo,
-    session::{Session, SessionChecked},
+    session::{PageHeader, Session, SessionChecked},
     share::SharePanel,
     sync::SyncStatus,
 };
@@ -55,8 +55,13 @@ pub fn ListPage() -> impl IntoView {
             let list = repo.list(id).expect("ready lists are local");
             view! { <ListView id list /> }.into_any()
         }
-        None if loading() => view! { <p class="status" role="status">"Loading…"</p> }.into_any(),
+        None if loading() => view! {
+            <BareHeader />
+            <p class="status" role="status">"Loading…"</p>
+        }
+        .into_any(),
         None if local.get().is_some() => view! {
+            <BareHeader />
             <p class="status">
                 "This list hasn't downloaded to this device yet. "
                 "It will once you're online and signed in. " <A href="/">"All lists"</A>
@@ -64,11 +69,26 @@ pub fn ListPage() -> impl IntoView {
         }
         .into_any(),
         None => view! {
+            <BareHeader />
             <p class="status">
                 "This list doesn't exist on this device. " <A href="/">"All lists"</A>
             </p>
         }
         .into_any(),
+    }
+}
+
+/// The add button's shape: a hand-drawn Memphis pebble.
+const PEBBLE: &str = "M14 20C19 8 40 5 50 12C60 19 60 38 52 48C44 58 22 59 13 50C5 42 9 30 14 20Z";
+
+/// The header for a list that can't be shown: just the way back.
+#[component]
+fn BareHeader() -> impl IntoView {
+    view! {
+        <PageHeader>
+            <A href="/" attr:class="back" attr:aria-label="All lists">"‹"</A>
+            <span class="spacer"></span>
+        </PageHeader>
     }
 }
 
@@ -78,6 +98,28 @@ fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
     let navigate = use_navigate();
     let (draft, set_draft) = signal(String::new());
     let (sharing, set_sharing) = signal(false);
+    let (added, set_added) = signal(None::<String>);
+    let add_sheet = NodeRef::<leptos::html::Dialog>::new();
+    let open_add = move |_| {
+        set_added.set(None);
+        if let Some(sheet) = add_sheet.get() {
+            let _ = sheet.show_modal();
+        }
+    };
+    let close_add = move || {
+        if let Some(sheet) = add_sheet.get() {
+            sheet.close();
+        }
+    };
+    let list_name = move || {
+        list.with(|l| {
+            if l.title.is_empty() {
+                "Untitled".to_string()
+            } else {
+                l.title.clone()
+            }
+        })
+    };
 
     let add = move |ev: SubmitEvent| {
         ev.prevent_default();
@@ -85,6 +127,7 @@ fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
         if text.is_empty() {
             return;
         }
+        set_added.set(Some(text.clone()));
         repo.change(id, |l| {
             let position = l.position_at(l.items.len(), None);
             let item = Item {
@@ -139,7 +182,7 @@ fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
     };
 
     view! {
-        <header>
+        <PageHeader>
             <A href="/" attr:class="back" attr:aria-label="All lists">"‹"</A>
             <input
                 class="list-title"
@@ -159,7 +202,7 @@ fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
             >
                 "Share"
             </button>
-        </header>
+        </PageHeader>
         <Show when=move || sharing.get()>
             <SharePanel id />
         </Show>
@@ -173,16 +216,55 @@ fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
                 </li>
             </Show>
         </ul>
-        <form class="add" on:submit=add>
-            <input
-                type="text"
-                placeholder="Add item"
-                aria-label="New item"
-                prop:value=draft
-                on:input=move |ev| set_draft.set(event_target_value(&ev))
-            />
-            <button type="submit">"Add"</button>
-        </form>
+        <Show when=move || mover.moving.get().is_none()>
+            <button class="fab" aria-label="Add item" aria-haspopup="dialog" on:click=open_add>
+                <svg viewBox="0 0 64 64" aria-hidden="true">
+                    <path class="shadow" transform="translate(4 4)" d=PEBBLE />
+                    <path class="face" d=PEBBLE />
+                    <path class="plus" d="M32 22v20M22 32h20" />
+                </svg>
+            </button>
+        </Show>
+        <dialog
+            class="add-sheet"
+            node_ref=add_sheet
+            aria-labelledby="add-title"
+            on:click=move |ev| {
+                // A click on the dialog itself, not its contents, is the backdrop.
+                let on_backdrop = ev
+                    .target()
+                    .is_some_and(|t| t.unchecked_into::<Element>().tag_name() == "DIALOG");
+                if on_backdrop {
+                    close_add();
+                }
+            }
+        >
+            <form class="add" on:submit=add>
+                <div class="add-head">
+                    <h2 id="add-title">"Add to " {list_name}</h2>
+                    <p class="hint" role="status">
+                        {move || added.get().map(|t| format!("Added “{t}”"))}
+                    </p>
+                </div>
+                <div class="add-row">
+                    <input
+                        type="text"
+                        placeholder="Item"
+                        aria-label="New item"
+                        autofocus
+                        prop:value=draft
+                        on:input=move |ev| set_draft.set(event_target_value(&ev))
+                    />
+                    <button type="submit">"Add"</button>
+                </div>
+                <div class="add-foot">
+                    <p class="hint">"Stays open so you can keep adding."</p>
+                    <button type="button" class="secondary" on:click=move |_| close_add()>
+                        "Done"
+                    </button>
+                </div>
+            </form>
+        </dialog>
         <footer>
             <Show when=any_done>
                 <button

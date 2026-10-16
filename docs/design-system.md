@@ -7,7 +7,7 @@ The tokens live at the top of `crates/web/style.css`. Every rule below that file
 ## Principles
 
 1. **Quiet by default.** Use `--bg`, `--fg`, `--muted` and `--line` for almost everything. `--accent` marks the one primary action on a screen and links.
-2. **Play where you touch.** `--pop-*` colors, ink outlines and `--pop-offset-*` shadows belong to direct manipulation only (today: reordering). Don't use them for decoration, status or ordinary buttons.
+2. **Ink everywhere, pops where you act.** Every control has the Memphis *form*: 2px `--fg` outlines and `--radius-pop` corners. Pop *colour* is rationed: the one primary action per view (yellow with a pink shadow), touch moments (checked boxes, the add button, reordering) and the account badge. Content (list cards, rows, panels) stays ink on neutral, with no coloured shadows or decoration.
 3. **Modes never move content.** Entering a mode must not change layout. Reorder drop targets are drawn over the existing row edges, and the e2e suite checks that rows don't shift.
 4. **The platform's type and theme.** `--font-sans` is the system UI face. Light and dark follow `prefers-color-scheme`. There is no in-app toggle.
 
@@ -30,7 +30,7 @@ The tokens live at the top of `crates/web/style.css`. Every rule below that file
 ### Contrast (WCAG)
 
 - Text: `--fg` on `--bg` is 16.7:1 (light) and 16.0:1 (dark). `--muted` is 4.6:1 and 6.9:1. `--danger` is 4.6:1 and 6.3:1. `--accent` text is 5.0:1 and 6.9:1. `--pop-ink` on `--pop-yellow` is 12.9:1.
-- **Known failure:** `--on-accent` on `--accent` passes in light (5.2:1) but is **2.5:1 in dark**, so white labels on dark-mode primary buttons are below 4.5:1. The fix is a dark `--on-accent` of `--bg` (about 6.9:1). That's a visible change, so it is not made yet.
+- Primary buttons are `--pop-ink` on `--pop-yellow` (12.9:1 in both themes). This replaced white on `--accent`, which failed in dark mode (2.5:1). `--accent` now marks links and focus rings only; `--on-accent` is kept for anything that still fills with it.
 - Pop colors on the light background are 1.5–2.5:1. A pop shape must therefore always carry the 1.5px `--fg` outline, which gives the shape its contrast. Never use a pop color for text or for a thin line.
 
 ## Pops
@@ -58,19 +58,26 @@ Weights: 400 for body text, 600 for titles and the item being moved, and 800 onl
 ## Spacing, radius and layout
 
 - **Spacing** uses a 4px step: `--space-1` 0.25rem, `--space-2` 0.5rem, `--space-3` 0.75rem, `--space-4` 1rem, `--space-8` 2rem. Lay out siblings with `gap` and keep margins for separating sections.
-- **Radius:** `--radius-control` (6px) for inputs, buttons and selects. `--radius-panel` (8px) for bordered panels such as Share. `--radius-pop` (4px) for pops.
+- **Radius:** `--radius-pop` (4px) for every control, card and panel. `--radius-control` and `--radius-panel` remain defined but are no longer used by the app.
 - **Measure:** content and the bottom sheet are capped at `--measure` (40rem) and centered.
-- **Elevation:** only the bottom sheet floats, with `--shadow-sheet`. Everything else is flat and separated by `--line`.
+- **Elevation:** shadows are hard offsets, never blurs, except `--shadow-sheet` under the mover sheet. The account panel takes a `--fg` offset; pops take a pink or cyan one.
 
 ## Components
 
-- **Button**: the default is primary (`--accent` fill). `.secondary` is a transparent fill with an `--fg` label. `.danger` is outlined in `--danger`. `.icon` is borderless and `--muted`. `.link` looks like a link. `.pop` is the one pop button, used in the mover sheet. Use at most one primary or pop button per view.
-- **Text field**: a transparent fill with a `--line` border and `--radius-control`. Inline-editable text (the list title and item text) hides the border until focus.
+- **Title bar** (`PageHeader`): the page's own controls, then the account icon, over a 2px `--fg` rule. Page and list titles are weight 800. Notices sit under it.
+- **Account icon** (`AccountMenu`): an avatar ring with the person's initial and a badge for sync. Synced is a cyan cloud with an ink tick, connecting dashes the ring, offline is a red slashed badge, and anything needing attention is a yellow ! triangle. Not signed in shows a phone outline instead of the avatar. Tapping it opens a panel with the name, the sync status in words and Sign in or Sign out. Its accessible name always states the status ("Account: synced").
+- **Notices**: ink-outlined boxes under the title bar for an ended session, another account's lists on this device, or a new version. Each has its fixing action.
+- **Button**: the default is primary: `--pop-yellow` fill, `--pop-ink` 800-weight label, 2px `--fg` outline and a pink `--pop-offset-sm` shadow that presses in. Use at most one per view. `.secondary` is an outline with no fill; with `aria-expanded="true"` it inverts to an `--fg` fill. `.danger` is outlined in `--danger`. `.icon` is borderless and `--muted`. `.link` looks like a link. `a.button` styles a link as a button.
+- **Text field**: a 2px `--line` border that turns `--fg` on focus. Inline-editable text (the list title and item text) hides its border.
+- **Checkbox**: a 2px `--fg` box. Checked, it fills `--pop-cyan` with an ink tick and a 2px `--fg` offset shadow.
+- **List card** (overview): a 2px `--fg` outlined card with the title, a `--muted` done count and a 4px ink progress bar on a `--line` track.
 - **Item row**: checkbox, text field, grip (`⠿`) and delete (`×`), separated by `--line`. Done items get a strikethrough in `--muted`.
+- **Add button** (`.fab`): a yellow hand-drawn pebble with an ink `+` and a pink shadow, fixed at the bottom centre. It is narrow and centred, so it only ever passes over item text, never a row's checkbox, grip or delete. The page footer leaves room for it, and it hides while an item is moving.
+- **Add sheet**: a modal sheet from the bottom with a 2px `--fg` top rule. It stays open after each item and confirms what was added; Done, Escape or the backdrop closes it.
 - **Drop arrow** (`.gutter`): the reorder target. A dotted `--fg` line at 45% runs along the row edge to a pop arrow at the right. It is zero-height, so the list never grows. Gutters aren't offered next to the moving item, because dropping there does nothing.
 - **Moving row**: the picked-up row gets a 2px `--fg` outline and a `--pop-offset-lg` cyan shadow. Its delete button is hidden.
 - **Mover sheet**: a fixed bottom sheet with a 2px `--fg` top border, a pink zigzag, the moving item's text, a `--muted` hint and a `.pop` Cancel button. Escape also cancels.
-- **Share panel**: a `--line`-bordered `--radius-panel` box with stacked content and `--muted` hints.
+- **Share panel**: a 2px `--fg` outlined box with stacked content and `--muted` hints.
 
 ## Icons and imagery
 

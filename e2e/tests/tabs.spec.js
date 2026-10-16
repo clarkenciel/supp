@@ -2,7 +2,7 @@
 // over the same IndexedDB. Pages in one browser context are tabs.
 const { test, expect } = require('@playwright/test');
 const {
-  invite, uniqueName, signIn, items, expectItems, createList, addItem, goOffline,
+  invite, uniqueName, signIn, items, expectItems, createList, addItem, goOffline, openAccount,
 } = require('./helpers');
 
 const lists = (page) => page.locator('ul.lists li');
@@ -40,6 +40,8 @@ const texts = (page) => items(page).evaluateAll((els) => els.map((el) => el.valu
 async function addUntilCompacted(page, prefix) {
   const added = [];
   let chunks = await stored(page, 'changes');
+  // The add sheet stays open between items.
+  await page.getByRole('button', { name: 'Add item' }).click();
   for (let i = 0; i < 200; i += 1) {
     const text = `${prefix}${i}`;
     await page.getByLabel('New item').fill(text);
@@ -116,9 +118,13 @@ test('tabs follow signing in and out in another tab', async ({ context }) => {
   // Signing out erases this device's lists; the other tab doesn't keep
   // showing them.
   await a.goto('/');
+  await openAccount(a);
   await a.getByRole('button', { name: 'Sign out' }).click();
-  await expect(a.getByText('Lists are stored on this device only.')).toBeVisible();
-  await expect(b.getByText('Lists are stored on this device only.')).toBeVisible();
+  for (const page of [a, b]) {
+    await expect(page.getByRole('button', { name: 'Account: not signed in' })).toBeVisible();
+    await openAccount(page);
+    await expect(page.getByText('Lists are stored on this device only.')).toBeVisible();
+  }
   await expect(b.getByText("This list doesn't exist on this device.")).toBeVisible();
 });
 

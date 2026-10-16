@@ -27,6 +27,7 @@
   --space-2: 0.5rem;
   --space-3: 0.75rem;
   --space-4: 1rem;
+  --space-6: 1.5rem;
   --space-8: 2rem;
 
   --radius-pop: 0.25rem;
@@ -69,14 +70,19 @@ main {
   padding: var(--space-4);
 }
 
+/* The title bar: the page's own controls, then the account icon, over a
+   heavy ink rule. */
 header {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  padding-bottom: var(--space-3);
+  border-bottom: 2px solid var(--fg);
   margin-bottom: var(--space-4);
 }
+header .spacer { flex: 1; }
 
-h1 { margin: 0; font-size: var(--text-xl); }
+h1 { margin: 0; flex: 1; font-size: var(--text-xl); font-weight: 800; }
 
 a { color: var(--accent); }
 
@@ -84,29 +90,61 @@ input[type="text"] {
   font: inherit;
   color: inherit;
   background: transparent;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-pop);
   padding: var(--space-2);
   min-width: 0;
 }
+input[type="text"]:focus { border-color: var(--fg); }
 
-button {
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Buttons. The primary one is a pop: yellow, ink-outlined, with a hard
+   pink shadow. Everything else is an ink outline on nothing. */
+button, a.button {
   font: inherit;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
+  font-weight: 800;
+  border: 2px solid var(--fg);
+  border-radius: var(--radius-pop);
   padding: var(--space-2) var(--space-3);
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--pop-yellow);
+  color: var(--pop-ink);
+  box-shadow: var(--pop-offset-sm) var(--pop-offset-sm) 0 var(--pop-pink);
   cursor: pointer;
+}
+button:active:not(:disabled) {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--pop-pink);
 }
 
 button:disabled { opacity: 0.3; cursor: default; }
-button.secondary { background: transparent; color: var(--fg); }
-button.danger { background: transparent; color: var(--danger); border-color: var(--danger); }
+button.secondary, a.button.secondary {
+  background: transparent;
+  color: var(--fg);
+  font-weight: 600;
+  box-shadow: none;
+}
+a.button {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  text-decoration: none;
+}
+button.secondary[aria-expanded="true"] { background: var(--fg); color: var(--bg); }
+button.danger {
+  background: transparent;
+  color: var(--danger);
+  border-color: var(--danger);
+  font-weight: 600;
+  box-shadow: none;
+}
+button.secondary:active, button.danger:active { transform: translate(1px, 1px); box-shadow: none; }
 button.icon {
   background: transparent;
   color: var(--muted);
   border: none;
+  box-shadow: none;
+  font-weight: 400;
   padding: var(--space-2);
   min-width: 2.25rem;
 }
@@ -117,25 +155,40 @@ button.icon {
   padding: 0 var(--space-2);
 }
 
-.list-title {
+input.list-title {
   flex: 1;
   font-size: var(--text-lg) !important;
-  font-weight: 600;
+  font-weight: 800;
   border-color: transparent !important;
 }
 
 ul { list-style: none; margin: 0; padding: 0; }
 
+/* Lists overview: each list an ink-outlined card with a thin ink bar for
+   how much is done. No pops here: it's content. */
+ul.lists { display: flex; flex-direction: column; gap: var(--space-3); }
 .lists li a {
-  display: flex;
-  justify-content: space-between;
-  padding: var(--space-3) var(--space-1);
-  border-bottom: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3);
+  border: 2px solid var(--fg);
+  border-radius: var(--radius-pop);
   text-decoration: none;
   color: inherit;
 }
+.lists .title { font-weight: 700; overflow-wrap: anywhere; }
+.lists .bar {
+  grid-column: 1 / -1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.lists .bar span { display: block; height: 100%; background: var(--fg); }
 
-.progress { color: var(--muted); }
+.progress { color: var(--muted); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 
 .items li {
   display: flex;
@@ -145,7 +198,23 @@ ul { list-style: none; margin: 0; padding: 0; }
   padding: var(--space-1) 0;
 }
 
-.items input[type="checkbox"] { width: 1.25rem; height: 1.25rem; margin: 0 var(--space-2); }
+/* Checkboxes: an ink box that fills cyan with an ink tick when done. */
+.items input[type="checkbox"] {
+  appearance: none;
+  flex: none;
+  width: 1.375rem;
+  height: 1.375rem;
+  margin: 0 var(--space-2);
+  border: 2px solid var(--fg);
+  border-radius: var(--radius-pop);
+  background: transparent center / 0.875rem no-repeat;
+  cursor: pointer;
+}
+.items input[type="checkbox"]:checked {
+  background-color: var(--pop-cyan);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230c0a09' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+  box-shadow: 2px 2px 0 var(--fg);
+}
 .items .text { flex: 1; border-color: transparent; }
 .items li.done .text { text-decoration: line-through; color: var(--muted); }
 
@@ -181,6 +250,7 @@ ul { list-style: none; margin: 0; padding: 0; }
   border: none;
   border-radius: 0;
   background: transparent;
+  box-shadow: none;
 }
 .items li.end-gutter .gutter { top: -14px; }
 .items .gutter::before {
@@ -269,29 +339,133 @@ footer {
   justify-content: space-between;
   gap: var(--space-2);
   margin-top: var(--space-8);
+  /* Room for the add button, so the last controls scroll clear of it. */
+  margin-bottom: 5.5rem;
 }
+
+/* The add button: a Memphis pebble floating at the bottom centre. Being
+   narrow and centred, it only ever passes over item text, never a row's
+   checkbox, grip or delete. */
+.fab {
+  position: fixed;
+  z-index: 5;
+  left: 50%;
+  bottom: calc(var(--space-6) + env(safe-area-inset-bottom, 0px));
+  width: 3.5rem;
+  height: 3.5rem;
+  margin-left: -1.75rem;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  box-shadow: none;
+}
+.fab:active:not(:disabled) { transform: translate(2px, 2px); box-shadow: none; }
+.fab svg { width: 100%; height: 100%; overflow: visible; }
+.fab .shadow { fill: var(--pop-pink); }
+.fab .face { fill: var(--pop-yellow); stroke: var(--fg); stroke-width: 3; stroke-linejoin: round; }
+.fab .plus { stroke: var(--pop-ink); stroke-width: 4.5; stroke-linecap: round; }
+
+/* Adding items: a sheet over the list that stays open between items. */
+dialog.add-sheet {
+  position: fixed;
+  inset: auto 0 0;
+  width: 100%;
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-4) calc(var(--space-6) + env(safe-area-inset-bottom, 0px));
+  border: none;
+  border-top: 2px solid var(--fg);
+  background: var(--bg);
+  color: var(--fg);
+}
+dialog.add-sheet::backdrop { background: rgb(12 10 9 / 0.45); }
+.add-sheet form.add { flex-direction: column; gap: var(--space-3); margin: 0; }
+.add-head, .add-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.add-foot { align-items: center; }
+.add-head h2 { margin: 0; font-size: 1.125rem; font-weight: 800; overflow-wrap: anywhere; }
+.add-row { display: flex; gap: var(--space-2); }
+.add-row input { flex: 1; }
+.add-sheet .hint { margin: 0; color: var(--muted); font-size: var(--text-sm); }
 
 .status { color: var(--muted); }
 .status.error { color: var(--danger); }
 
-nav.account {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2) var(--space-3);
-  justify-content: flex-end;
-  font-size: var(--text-sm);
-  margin-bottom: var(--space-2);
+/* The account icon: an avatar whose badge says how syncing is going. */
+.account { position: relative; flex: none; }
+.account-icon {
+  display: block;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  box-shadow: none;
+  color: var(--fg);
 }
+.account-icon:active:not(:disabled) { transform: none; box-shadow: none; }
+.account-icon svg { width: 100%; height: 100%; overflow: visible; }
+.account-icon .ink { fill: none; stroke: var(--fg); stroke-width: 2; stroke-linecap: round; }
+.account-icon .dashed { stroke-dasharray: 5 3.5; }
+.account-icon text { fill: var(--fg); font: 800 14px var(--font-sans); }
+.account-icon .halo { fill: var(--bg); }
+.account-icon .cloud { fill: var(--pop-cyan); stroke: var(--fg); stroke-width: 2; stroke-linejoin: round; }
+.account-icon .tick { fill: none; stroke: var(--pop-ink); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.account-icon .offline { fill: var(--bg); stroke: var(--danger); stroke-width: 2; }
+.account-icon .warn { fill: var(--pop-yellow); stroke: var(--fg); stroke-width: 2; stroke-linejoin: round; }
+.account-icon .warn-mark { stroke: var(--pop-ink); stroke-width: 2; stroke-linecap: round; }
+.account-icon .warn-dot { fill: var(--pop-ink); }
 
-nav.account .muted, nav.account .who { color: var(--muted); }
-nav.account .banner { flex-basis: 100%; text-align: right; }
-nav.account .banner.error { color: var(--danger); }
-nav.account button { font-size: var(--text-sm); padding: var(--space-1) var(--space-2); }
+.account-scrim { position: fixed; inset: 0; z-index: 19; }
+.account-panel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  width: min(16rem, calc(100vw - 2rem));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--bg);
+  border: 2px solid var(--fg);
+  border-radius: var(--radius-pop);
+  box-shadow: var(--pop-offset-lg) var(--pop-offset-lg) 0 var(--fg);
+  font-size: var(--text-sm);
+}
+.account-panel[hidden] { display: none; }
+.account-panel p { margin: 0; }
+.account-panel .who { font-weight: 800; font-size: 1rem; }
+.account-panel .muted { color: var(--muted); }
+.account-panel button { align-self: flex-start; }
+
+/* Notes that need attention sit under the title bar as outlined boxes. */
+.notices { display: flex; flex-direction: column; gap: var(--space-2); }
+.notices:not(:empty) { margin-bottom: var(--space-4); }
+.notice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 2px solid var(--fg);
+  border-radius: var(--radius-pop);
+  font-size: var(--text-sm);
+}
+.notice p { margin: 0; }
+.notice button { align-self: flex-start; }
+.notice .actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 
 button.link {
   background: none;
   border: none;
+  box-shadow: none;
+  font-weight: 400;
   color: var(--accent);
   padding: 0;
   text-decoration: underline;
@@ -304,8 +478,8 @@ select {
   font: inherit;
   color: inherit;
   background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
+  border: 2px solid var(--fg);
+  border-radius: var(--radius-pop);
   padding: var(--space-2);
 }
 
@@ -313,8 +487,8 @@ select {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-panel);
+  border: 2px solid var(--fg);
+  border-radius: var(--radius-pop);
   padding: var(--space-3);
   margin-bottom: var(--space-4);
 }
