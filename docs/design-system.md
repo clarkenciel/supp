@@ -79,6 +79,10 @@ Weights: 400 for body text, 600 for titles and the item being moved, and 800 onl
 - **Mover sheet**: a fixed bottom sheet with a 2px `--fg` top border, a pink zigzag, the moving item's text, a `--muted` hint and a `.pop` Cancel button. Escape also cancels.
 - **Share panel**: a 2px `--fg` outlined box with stacked content and `--muted` hints.
 
+## Server pages
+
+The server renders its own sign-in pages: the dev provider's form and the "Couldn't sign you in" page, for a missing invite or a disabled account. `crates/server/src/auth/page.rs` compiles `crates/web/style.css` into them, so they use the same tokens and components without needing the client built. Each page has the brand row (the pebble mark and "supp"), a title bar, a notice, then its form or a way back. With Google as the provider, the sign-in form itself is Google's page, and only the error page is ours.
+
 ## Icons and imagery
 
 There is no icon font. Glyphs are typed characters: `‹` back, `⠿` grip, `×` delete. Use inline SVG only where a shape has to be drawn, like the drop arrow. The app icon (`crates/web/icons/`, drawn in `icon.svg`) is the add button's yellow pebble with an ink tick and a pink offset shadow, on an `fg`-dark tile. The maskable PNG shrinks the pebble into Android's safe zone, and the browser uses the SVG as its favicon.

@@ -197,16 +197,12 @@ pub async fn dev_sign_in(Query(params): Query<HashMap<String, String>>) -> Html<
 }
 
 fn error_page(status: StatusCode, message: &str) -> Response {
-    let message = message
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;");
     let body = format!(
-        "<!doctype html><meta charset=\"utf-8\">\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
-         <title>Sign-in problem</title><p>{message}</p><p><a href=\"/\">Back to your lists</a></p>"
+        r#"<div class="notice" role="alert"><p>{}</p></div>
+  <a class="button secondary" href="/">Back to your lists</a>"#,
+        super::page::escape(message)
     );
-    (status, Html(body)).into_response()
+    (status, Html(super::page::page("Couldn't sign you in", &body))).into_response()
 }
 
 fn time_secs(secs: i64) -> time::Duration {
