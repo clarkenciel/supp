@@ -10,7 +10,7 @@ use supp_shared::{
     DocId,
     schema::{Item, ListDoc},
 };
-use supp_ui::{Pebble, Status};
+use supp_ui::{LiveStatus, Pebble, Status};
 use wasm_bindgen::JsCast;
 use web_sys::{Element, FocusOptions, HtmlElement};
 
@@ -58,7 +58,7 @@ pub fn ListPage() -> impl IntoView {
         }
         None if loading() => view! {
             <BareHeader />
-            <Status live=true>"Loading…"</Status>
+            <LiveStatus>"Loading…"</LiveStatus>
         }
         .into_any(),
         None if local.get().is_some() => view! {
@@ -79,33 +79,44 @@ pub fn ListPage() -> impl IntoView {
     }
 }
 
-/// The header for a list that can't be shown: just the way back.
+/// Adding items: the floating pebble button and the sheet it opens. The
+/// button is `hidden` while an item is being moved, when the mover sheet
+/// has the bottom edge.
 #[component]
-fn BareHeader() -> impl IntoView {
-    view! {
-        <PageHeader>
-            <A href="/" attr:class="back" attr:aria-label="All lists">"‹"</A>
-            <span class="spacer"></span>
-        </PageHeader>
-    }
-}
-
-#[component]
-fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
-    let repo = expect_context::<Repo>();
-    let navigate = use_navigate();
-    let (draft, set_draft) = signal(String::new());
-    let (sharing, set_sharing) = signal(false);
-    let (added, set_added) = signal(None::<String>);
-    let add_sheet = NodeRef::<leptos::html::Dialog>::new();
-    let open_add = move |_| {
-        set_added.set(None);
-        if let Some(sheet) = add_sheet.get() {
+fn AddItem(id: DocId, list: Signal<ListDoc>, hidden: Signal<bool>) -> impl IntoView {
+    let sheet = NodeRef::<leptos::html::Dialog>::new();
+    let open = move |_| {
+        if let Some(sheet) = sheet.get() {
             let _ = sheet.show_modal();
         }
     };
-    let close_add = move || {
-        if let Some(sheet) = add_sheet.get() {
+    view! {
+        <Show when=move || !hidden.get()>
+            <button class="fab" aria-label="Add item" aria-haspopup="dialog" on:click=open>
+                <Pebble>
+                    <path class="glyph" d="M32 22v20M22 32h20" />
+                </Pebble>
+            </button>
+        </Show>
+        <AddSheet id list sheet />
+    }
+}
+
+/// A modal sheet for adding items to the end of the list. It stays open
+/// after each one, saying what was added, so several can go in a row; Done,
+/// Escape or a tap on the backdrop closes it.
+#[component]
+fn AddSheet(
+    id: DocId,
+    list: Signal<ListDoc>,
+    /// The `<dialog>`, for whoever opens it.
+    sheet: NodeRef<leptos::html::Dialog>,
+) -> impl IntoView {
+    let repo = expect_context::<Repo>();
+    let (draft, set_draft) = signal(String::new());
+    let (added, set_added) = signal(None::<String>);
+    let close = move || {
+        if let Some(sheet) = sheet.get() {
             sheet.close();
         }
     };
@@ -118,7 +129,6 @@ fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
             }
         })
     };
-
     let add = move |ev: SubmitEvent| {
         ev.prevent_default();
         let text = draft.get_untracked().trim().to_string();
@@ -138,6 +148,68 @@ fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
         set_draft.set(String::new());
     };
 
+    view! {
+        <dialog
+            class="add-sheet"
+            node_ref=sheet
+            aria-labelledby="add-title"
+            // Each opening starts afresh.
+            on:close=move |_| set_added.set(None)
+            on:click=move |ev| {
+                // A click on the dialog itself, not its contents, is the backdrop.
+                let on_backdrop = ev
+                    .target()
+                    .is_some_and(|t| t.unchecked_into::<Element>().tag_name() == "DIALOG");
+                if on_backdrop {
+                    close();
+                }
+            }
+        >
+            <form class="add" on:submit=add>
+                <div class="add-head">
+                    <h2 id="add-title">"Add to " {list_name}</h2>
+                    <p class="hint" role="status">
+                        {move || added.get().map(|t| format!("Added “{t}”"))}
+                    </p>
+                </div>
+                <div class="add-row">
+                    <input
+                        type="text"
+                        placeholder="Item"
+                        aria-label="New item"
+                        autofocus
+                        prop:value=draft
+                        on:input=move |ev| set_draft.set(event_target_value(&ev))
+                    />
+                    <button type="submit">"Add"</button>
+                </div>
+                <div class="add-foot">
+                    <p class="hint">"Stays open so you can keep adding."</p>
+                    <button type="button" class="secondary" on:click=move |_| close()>
+                        "Done"
+                    </button>
+                </div>
+            </form>
+        </dialog>
+    }
+}
+
+/// The header for a list that can't be shown: just the way back.
+#[component]
+fn BareHeader() -> impl IntoView {
+    view! {
+        <PageHeader>
+            <A href="/" attr:class="back" attr:aria-label="All lists">"‹"</A>
+            <span class="spacer"></span>
+        </PageHeader>
+    }
+}
+
+#[component]
+fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
+    let repo = expect_context::<Repo>();
+    let navigate = use_navigate();
+    let (sharing, set_sharing) = signal(false);
     let delete_list = move |_| {
         let confirmed = window()
             .confirm_with_message("Delete this list from this device?")
@@ -214,53 +286,7 @@ fn ListView(id: DocId, list: Signal<ListDoc>) -> impl IntoView {
                 </li>
             </Show>
         </ul>
-        <Show when=move || mover.moving.get().is_none()>
-            <button class="fab" aria-label="Add item" aria-haspopup="dialog" on:click=open_add>
-                <Pebble>
-                    <path class="glyph" d="M32 22v20M22 32h20" />
-                </Pebble>
-            </button>
-        </Show>
-        <dialog
-            class="add-sheet"
-            node_ref=add_sheet
-            aria-labelledby="add-title"
-            on:click=move |ev| {
-                // A click on the dialog itself, not its contents, is the backdrop.
-                let on_backdrop = ev
-                    .target()
-                    .is_some_and(|t| t.unchecked_into::<Element>().tag_name() == "DIALOG");
-                if on_backdrop {
-                    close_add();
-                }
-            }
-        >
-            <form class="add" on:submit=add>
-                <div class="add-head">
-                    <h2 id="add-title">"Add to " {list_name}</h2>
-                    <p class="hint" role="status">
-                        {move || added.get().map(|t| format!("Added “{t}”"))}
-                    </p>
-                </div>
-                <div class="add-row">
-                    <input
-                        type="text"
-                        placeholder="Item"
-                        aria-label="New item"
-                        autofocus
-                        prop:value=draft
-                        on:input=move |ev| set_draft.set(event_target_value(&ev))
-                    />
-                    <button type="submit">"Add"</button>
-                </div>
-                <div class="add-foot">
-                    <p class="hint">"Stays open so you can keep adding."</p>
-                    <button type="button" class="secondary" on:click=move |_| close_add()>
-                        "Done"
-                    </button>
-                </div>
-            </form>
-        </dialog>
+        <AddItem id list hidden=Signal::derive(move || mover.moving.get().is_some()) />
         <footer>
             <Show when=any_done>
                 <button

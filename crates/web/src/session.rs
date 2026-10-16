@@ -8,7 +8,7 @@ use leptos::{logging, prelude::*, task::spawn_local};
 use prost::Message as _;
 use supp_shared::proto::api::v1::Me;
 
-use supp_ui::{Notice, Status};
+use supp_ui::{ErrorStatus, Notice};
 
 use crate::{
     pwa::{self, NewVersion},
@@ -297,7 +297,7 @@ fn AccountPanel(open: ReadSignal<bool>) -> impl IntoView {
                 }
                 .into_any(),
             }}
-            {move || problem.get().map(|p| view! { <Status error=true>{p}</Status> })}
+            {move || problem.get().map(|p| view! { <ErrorStatus>{p}</ErrorStatus> })}
         </div>
     }
 }
@@ -426,7 +426,7 @@ pub fn Notices() -> impl IntoView {
                         }
                     })
             }}
-            {move || problem.get().map(|p| view! { <Status error=true>{p}</Status> })}
+            {move || problem.get().map(|p| view! { <ErrorStatus>{p}</ErrorStatus> })}
         </div>
     }
 }

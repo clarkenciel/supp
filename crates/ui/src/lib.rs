@@ -47,38 +47,50 @@ pub fn Brand() -> impl IntoView {
     view! { <p class="brand"><AppMark />"supp"</p> }
 }
 
-/// A line of text saying how things stand: loading, missing, or gone
-/// wrong. An `error` is announced at once (`role="alert"`); `live` text is
-/// announced when it changes (`role="status"`); otherwise it's just read in
-/// place.
+/// A line of text saying how things stand, read in place: something
+/// missing, or nowhere to go.
 #[component]
-pub fn Status(
-    #[prop(optional)] error: bool,
-    #[prop(optional)] live: bool,
+pub fn Status(children: Children) -> impl IntoView {
+    view! { <StatusLine class="status" role=None>{children()}</StatusLine> }
+}
+
+/// A status that screen readers announce when it changes, such as
+/// "Loading…" (`role="status"`).
+#[component]
+pub fn LiveStatus(children: Children) -> impl IntoView {
+    view! { <StatusLine class="status" role=Some("status")>{children()}</StatusLine> }
+}
+
+/// Something that went wrong, announced at once (`role="alert"`) and shown
+/// in the danger colour.
+#[component]
+pub fn ErrorStatus(children: Children) -> impl IntoView {
+    view! { <StatusLine class="status error" role=Some("alert")>{children()}</StatusLine> }
+}
+
+#[component]
+fn StatusLine(
+    class: &'static str,
+    role: Option<&'static str>,
     children: Children,
 ) -> impl IntoView {
-    let role = if error {
-        Some("alert")
-    } else if live {
-        Some("status")
-    } else {
-        None
-    };
-    view! {
-        <p class="status" class:error=error role=role>
-            {children()}
-        </p>
-    }
+    view! { <p class=class role=role>{children()}</p> }
 }
 
 /// An outlined box for something that needs the person: what happened, then
-/// the action that fixes it. An `alert` is announced at once; otherwise it's
-/// a polite status.
+/// the action that fixes it. Announced politely (`role="status"`).
 #[component]
-pub fn Notice(#[prop(optional)] alert: bool, children: Children) -> impl IntoView {
-    view! {
-        <div class="notice" role=if alert { "alert" } else { "status" }>
-            {children()}
-        </div>
-    }
+pub fn Notice(children: Children) -> impl IntoView {
+    view! { <NoticeBox role="status">{children()}</NoticeBox> }
+}
+
+/// A notice for a failure, announced at once (`role="alert"`).
+#[component]
+pub fn AlertNotice(children: Children) -> impl IntoView {
+    view! { <NoticeBox role="alert">{children()}</NoticeBox> }
+}
+
+#[component]
+fn NoticeBox(role: &'static str, children: Children) -> impl IntoView {
+    view! { <div class="notice" role=role>{children()}</div> }
 }

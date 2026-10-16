@@ -10,7 +10,7 @@
 
 use leptos::prelude::*;
 use std::collections::HashMap;
-use supp_ui::Notice;
+use supp_ui::AlertNotice;
 
 use axum::{
     extract::{Path, Query, State},
@@ -201,9 +201,9 @@ pub async fn dev_sign_in(Query(params): Query<HashMap<String, String>>) -> Html<
 fn error_page(status: StatusCode, message: &str) -> Response {
     let message = message.to_string();
     let body = view! {
-        <Notice alert=true>
+        <AlertNotice>
             <p>{message}</p>
-        </Notice>
+        </AlertNotice>
         <a class="button secondary" href="/">"Back to your lists"</a>
     };
     (

@@ -22,7 +22,7 @@ use crate::{
     session::{Session, SessionChecked},
     sync::SyncStatus,
 };
-use supp_ui::Status;
+use supp_ui::{ErrorStatus, Status};
 
 fn main() {
     console_error_panic_hook::set_once();
@@ -49,7 +49,7 @@ fn main() {
                 leptos::mount::mount_to_body(move || {
                     view! {
                         <main>
-                            <Status error=true>"Could not open local storage: " {err}</Status>
+                            <ErrorStatus>"Could not open local storage: " {err}</ErrorStatus>
                         </main>
                     }
                 })

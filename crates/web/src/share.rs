@@ -9,7 +9,7 @@ use supp_shared::{
     DocId,
     proto::api::v1::{CreateShareLink, CreatedShareLink, Me, ShareLink, ShareLinks},
 };
-use supp_ui::Status;
+use supp_ui::ErrorStatus;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
@@ -266,7 +266,7 @@ fn ShareLinksPanel(id: DocId, me: Me) -> impl IntoView {
                 )}
             </p>
         })}
-        {move || error.get().map(|e| view! { <Status error=true>{e}</Status> })}
+        {move || error.get().map(|e| view! { <ErrorStatus>{e}</ErrorStatus> })}
         {move || match links.get() {
             None => view! { <p class="hint">"Loading links…"</p> }.into_any(),
             Some(links) if links.is_empty() => view! {
