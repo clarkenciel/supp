@@ -137,7 +137,7 @@ async fn main() -> anyhow::Result<()> {
                     Arc::new(DevProvider)
                 }
             };
-            let docs = Arc::new(Docs::new(store.clone(), DEFAULT_COMPACT_AFTER));
+            let docs = Arc::new(Docs::new(store.docs(), DEFAULT_COMPACT_AFTER));
             let mut state =
                 AppState::new(&store, docs, AuthConfig::new(provider, &public_url)).await?;
             state.static_dir = static_dir;

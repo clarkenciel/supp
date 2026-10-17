@@ -1,17 +1,11 @@
-//! SQLite persistence for Automerge documents.
+//! Automerge documents: a snapshot plus the incremental changes since it.
 
-use std::{path::Path, str::FromStr, time::Duration};
-
-use anyhow::Context;
 use automerge::Automerge;
-use sqlx::{
-    SqlitePool,
-    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
-};
+use sqlx::SqlitePool;
 use supp_shared::DocId;
 
 #[derive(Clone)]
-pub struct Store {
+pub struct DocStore {
     pool: SqlitePool,
 }
 
@@ -22,64 +16,9 @@ pub struct Loaded {
     pub change_rows: usize,
 }
 
-impl Store {
-    pub async fn open(path: &Path) -> anyhow::Result<Self> {
-        let options = SqliteConnectOptions::from_str("sqlite:")?
-            .filename(path)
-            .create_if_missing(true)
-            .journal_mode(SqliteJournalMode::Wal)
-            // In WAL mode NORMAL can lose the latest commits on power loss but
-            // never corrupts; clients still hold those changes and resend them.
-            .synchronous(SqliteSynchronous::Normal)
-            .foreign_keys(true)
-            .busy_timeout(Duration::from_secs(5));
-        let pool = SqlitePoolOptions::new()
-            .connect_with(options)
-            .await
-            .with_context(|| format!("opening {}", path.display()))?;
-        sqlx::migrate!().run(&pool).await?;
-        Ok(Self { pool })
-    }
-
-    pub fn accounts(&self) -> crate::accounts::Accounts {
-        crate::accounts::Accounts::new(self.pool.clone())
-    }
-
-    /// A 64-byte secret stored under `name`, generated on first use. Keeping
-    /// it in the database means restarts don't invalidate cookies and there
-    /// is no key file to manage.
-    pub async fn server_key(&self, name: &str) -> anyhow::Result<[u8; 64]> {
-        let mut fresh = [0u8; 64];
-        getrandom::fill(&mut fresh).expect("system randomness");
-        sqlx::query("INSERT OR IGNORE INTO server_keys (name, key) VALUES (?, ?)")
-            .bind(name)
-            .bind(fresh.as_slice())
-            .execute(&self.pool)
-            .await?;
-        let key: Vec<u8> = sqlx::query_scalar("SELECT key FROM server_keys WHERE name = ?")
-            .bind(name)
-            .fetch_one(&self.pool)
-            .await?;
-        key.try_into()
-            .map_err(|_| anyhow::anyhow!("server key {name} has the wrong length"))
-    }
-
-    /// Writes a consistent copy of the whole database to `path`, which must
-    /// not exist. `VACUUM INTO` reads one snapshot of the database, so it is
-    /// safe while the server writes (WAL), and the copy is compact.
-    pub async fn backup(&self, path: &Path) -> anyhow::Result<()> {
-        let path = path
-            .to_str()
-            .context("backup path must be valid UTF-8 for SQLite")?;
-        sqlx::query("VACUUM INTO ?")
-            .bind(path)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
-    pub async fn close(&self) {
-        self.pool.close().await;
+impl DocStore {
+    pub(crate) fn new(pool: SqlitePool) -> Self {
+        Self { pool }
     }
 
     /// Loads a document, or `None` if nothing has been stored for it.

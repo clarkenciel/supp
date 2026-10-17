@@ -13,20 +13,20 @@ use automerge::{
 use supp_shared::DocId;
 use tokio::sync::{Mutex, watch};
 
-use crate::store::Store;
+use crate::store::DocStore;
 
 /// Change rows a document may accumulate before it is compacted.
 pub const DEFAULT_COMPACT_AFTER: usize = 100;
 
 pub struct Docs {
-    store: Store,
+    store: DocStore,
     compact_after: usize,
     // Held across loads so concurrent subscribers never load a document twice.
     open: Mutex<HashMap<DocId, Arc<DocHandle>>>,
 }
 
 impl Docs {
-    pub fn new(store: Store, compact_after: usize) -> Self {
+    pub fn new(store: DocStore, compact_after: usize) -> Self {
         Self {
             store,
             compact_after,
@@ -62,7 +62,7 @@ impl Docs {
 
 pub struct DocHandle {
     id: DocId,
-    store: Store,
+    store: DocStore,
     compact_after: usize,
     heads: watch::Sender<Vec<ChangeHash>>,
     inner: Mutex<Inner>,

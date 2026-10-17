@@ -45,7 +45,7 @@ impl TestApp {
 
     async fn build(dir: tempfile::TempDir, static_dir: Option<PathBuf>) -> Self {
         let store = Store::open(&dir.path().join("supp.db")).await.unwrap();
-        let docs = Arc::new(Docs::new(store.clone(), 100));
+        let docs = Arc::new(Docs::new(store.docs(), 100));
         let auth = AuthConfig::new(Arc::new(DevProvider), "http://supp.test");
         let mut state = AppState::new(&store, docs, auth).await.unwrap();
         state.static_dir = static_dir;

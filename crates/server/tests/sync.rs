@@ -41,7 +41,7 @@ struct Server {
 impl Server {
     async fn start(db: &Path, compact_after: usize) -> Self {
         let store = Store::open(db).await.unwrap();
-        let docs = Arc::new(Docs::new(store.clone(), compact_after));
+        let docs = Arc::new(Docs::new(store.docs(), compact_after));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let auth = AuthConfig::new(Arc::new(DevProvider), &format!("http://{addr}"));
@@ -306,7 +306,7 @@ async fn persists_across_restart_and_compacts() {
 
     let server = Server::start(&db, 3).await;
     let (session, _) = server.session("alice").await;
-    assert!(server.store.change_rows(id).await.unwrap() < 3);
+    assert!(server.store.docs().change_rows(id).await.unwrap() < 3);
     let mut c = Client::connect(server.addr, &session, id, AutoCommit::new()).await;
     c.until(|l| l.title == "chores" && l.items.len() == 7).await;
     server.stop().await;

@@ -44,7 +44,7 @@ impl AppState {
             accounts: store.accounts(),
             auth: Arc::new(auth),
             static_dir: None,
-            cookie_key: Key::from(&store.server_key("cookie").await?),
+            cookie_key: Key::from(&store.keys().get("cookie").await?),
         })
     }
 }

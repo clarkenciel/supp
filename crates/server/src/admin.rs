@@ -284,7 +284,7 @@ mod tests {
         .await
         .unwrap();
         let doc = DocId::new();
-        store.append(doc, &list_doc_bytes()).await.unwrap();
+        store.docs().append(doc, &list_doc_bytes()).await.unwrap();
 
         // Taken while the source is open, as the server would have it.
         let path = dir.path().join("backup.db");
@@ -296,10 +296,22 @@ mod tests {
         let invites = copy.accounts().list_invites().await.unwrap();
         assert_eq!(invites.len(), 1);
         assert_eq!(invites[0].note, "first");
-        let loaded = copy.load(doc).await.unwrap().expect("document in backup");
+        let loaded = copy
+            .docs()
+            .load(doc)
+            .await
+            .unwrap()
+            .expect("document in backup");
         assert_eq!(
             loaded.doc.get_heads(),
-            store.load(doc).await.unwrap().unwrap().doc.get_heads()
+            store
+                .docs()
+                .load(doc)
+                .await
+                .unwrap()
+                .unwrap()
+                .doc
+                .get_heads()
         );
         copy.close().await;
 
