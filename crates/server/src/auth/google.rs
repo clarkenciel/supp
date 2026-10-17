@@ -60,7 +60,7 @@ impl GoogleProvider {
         let issuer = IssuerUrl::new(ISSUER.to_string()).expect("valid issuer URL");
         let metadata = CoreProviderMetadata::discover_async(issuer, &self.http)
             .await
-            .map_err(|e| ProviderError::Unavailable(format!("discovery: {e}")))?;
+            .map_err(|e| ProviderError::Unavailable(format!("discovery: {}", chain(&e))))?;
         let redirect = RedirectUrl::new(redirect_uri.to_string())
             .map_err(|e| ProviderError::Unavailable(format!("redirect URI: {e}")))?;
         Ok(CoreClient::from_provider_metadata(
@@ -126,7 +126,7 @@ impl IdentityProvider for GoogleProvider {
                 .set_pkce_verifier(PkceCodeVerifier::new(pending.pkce_verifier))
                 .request_async(&self.http)
                 .await
-                .map_err(|e| ProviderError::Rejected(format!("code exchange: {e}")))?;
+                .map_err(|e| ProviderError::Rejected(format!("code exchange: {}", chain(&e))))?;
             let id_token = response
                 .id_token()
                 .ok_or_else(|| ProviderError::Rejected("no ID token".into()))?;
@@ -147,6 +147,19 @@ impl IdentityProvider for GoogleProvider {
             })
         })
     }
+}
+
+/// `err` and its sources, joined by ": ". The openidconnect errors display
+/// only their outermost layer ("Request failed"), hiding the cause.
+fn chain(err: &dyn std::error::Error) -> String {
+    let mut message = err.to_string();
+    let mut source = err.source();
+    while let Some(err) = source {
+        message.push_str(": ");
+        message.push_str(&err.to_string());
+        source = err.source();
+    }
+    message
 }
 
 #[cfg(test)]

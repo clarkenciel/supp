@@ -82,13 +82,18 @@ RUN adduser \
 # The database lives on a volume at /data; SQLite may also spill temp files.
 RUN mkdir /data
 
+# Set file modes here: `COPY --chmod` would also apply them to the directories
+# it creates, leaving /etc untraversable (mode 444) for the unprivileged user,
+# so musl couldn't read /etc/resolv.conf and every DNS lookup failed.
+RUN chmod 444 /etc/passwd /etc/group /etc/ssl/certs/ca-certificates.crt
+
 ####################################################################################################
 ## Final image
 ####################################################################################################
 FROM scratch
 
-COPY --from=files --chmod=444 /etc/passwd /etc/group /etc/
-COPY --from=files --chmod=444 /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=files /etc/passwd /etc/group /etc/
+COPY --from=files /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=files /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=files --chmod=1777 /tmp /tmp
 COPY --from=files --chown=supp:supp /data /data
