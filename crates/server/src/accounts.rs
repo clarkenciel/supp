@@ -146,11 +146,11 @@ pub enum Access {
 }
 
 #[derive(Clone)]
-pub struct Accounts {
+pub struct AccountStore {
     pool: SqlitePool,
 }
 
-impl Accounts {
+impl AccountStore {
     pub(crate) fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
@@ -609,7 +609,7 @@ mod tests {
     use super::*;
     use crate::Store;
 
-    async fn accounts() -> (tempfile::TempDir, Accounts) {
+    async fn accounts() -> (tempfile::TempDir, AccountStore) {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(&dir.path().join("supp.db")).await.unwrap();
         (dir, store.accounts())
@@ -633,7 +633,7 @@ mod tests {
         }
     }
 
-    async fn signup(accounts: &Accounts, name: &str) -> User {
+    async fn signup(accounts: &AccountStore, name: &str) -> User {
         let (_, token) = accounts.create_invite(invite(None, 1)).await.unwrap();
         accounts
             .login(&identity(name), Some(&token))

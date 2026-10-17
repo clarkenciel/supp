@@ -11,7 +11,7 @@ use futures_util::{SinkExt, StreamExt};
 use prost::Message as _;
 use supp_server::{
     AppState, Docs, Store,
-    accounts::{Accounts, Identity, NewInvite, Token, UserId},
+    accounts::{AccountStore, Identity, NewInvite, Token, UserId},
     app,
     auth::{AuthConfig, DevProvider},
 };
@@ -33,7 +33,7 @@ const DEADLINE: Duration = Duration::from_secs(5);
 struct Server {
     addr: SocketAddr,
     store: Store,
-    accounts: Accounts,
+    accounts: AccountStore,
     shutdown: oneshot::Sender<()>,
     task: JoinHandle<()>,
 }

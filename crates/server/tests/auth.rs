@@ -11,7 +11,7 @@ use http_body_util::BodyExt;
 use prost::Message as _;
 use supp_server::{
     AppState, Docs, Store,
-    accounts::{Accounts, NewInvite, Token, UserId},
+    accounts::{AccountStore, NewInvite, Token, UserId},
     app,
     auth::{AuthConfig, DevProvider},
 };
@@ -24,7 +24,7 @@ use tower::ServiceExt;
 struct TestApp {
     _dir: tempfile::TempDir,
     router: Router,
-    accounts: Accounts,
+    accounts: AccountStore,
 }
 
 /// A browser: remembers cookies across requests.

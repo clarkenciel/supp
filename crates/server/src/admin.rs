@@ -13,7 +13,7 @@ use anyhow::{Context, bail};
 
 use crate::{
     Store,
-    accounts::{Accounts, InviteId, NewInvite, UserId},
+    accounts::{AccountStore, InviteId, NewInvite, UserId},
 };
 
 /// Parses durations like `30m`, `12h`, `7d`.
@@ -36,7 +36,7 @@ pub fn join_url(public_url: &str, token: &str) -> String {
 }
 
 pub async fn invite_create(
-    accounts: &Accounts,
+    accounts: &AccountStore,
     public_url: &str,
     ttl: Duration,
     max_uses: u32,
@@ -56,7 +56,7 @@ pub async fn invite_create(
     Ok(())
 }
 
-pub async fn invite_list(accounts: &Accounts, out: &mut impl Write) -> anyhow::Result<()> {
+pub async fn invite_list(accounts: &AccountStore, out: &mut impl Write) -> anyhow::Result<()> {
     let now = unix_now();
     for i in accounts.list_invites().await? {
         let status = if i.revoked {
@@ -83,7 +83,7 @@ pub async fn invite_list(accounts: &Accounts, out: &mut impl Write) -> anyhow::R
 }
 
 pub async fn invite_revoke(
-    accounts: &Accounts,
+    accounts: &AccountStore,
     id: i64,
     out: &mut impl Write,
 ) -> anyhow::Result<()> {
@@ -95,7 +95,7 @@ pub async fn invite_revoke(
     }
 }
 
-pub async fn user_list(accounts: &Accounts, out: &mut impl Write) -> anyhow::Result<()> {
+pub async fn user_list(accounts: &AccountStore, out: &mut impl Write) -> anyhow::Result<()> {
     for u in accounts.list_users().await? {
         let invited_by = u.invited_by.as_deref().unwrap_or("admin");
         let disabled = if u.disabled { "  DISABLED" } else { "" };
@@ -109,7 +109,7 @@ pub async fn user_list(accounts: &Accounts, out: &mut impl Write) -> anyhow::Res
 }
 
 pub async fn user_disable(
-    accounts: &Accounts,
+    accounts: &AccountStore,
     id: i64,
     out: &mut impl Write,
 ) -> anyhow::Result<()> {

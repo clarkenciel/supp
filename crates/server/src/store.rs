@@ -1,9 +1,6 @@
 //! The SQLite database. `Store` owns the connection pool and hands out a
 //! store for each kind of data in it.
 
-mod docs;
-mod keys;
-
 use std::{path::Path, str::FromStr, time::Duration};
 
 use anyhow::Context;
@@ -11,9 +8,6 @@ use sqlx::{
     SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
 };
-
-pub use docs::{DocStore, Loaded};
-pub use keys::KeyStore;
 
 #[derive(Clone)]
 pub struct Store {
@@ -39,16 +33,16 @@ impl Store {
         Ok(Self { pool })
     }
 
-    pub fn docs(&self) -> DocStore {
-        DocStore::new(self.pool.clone())
+    pub fn docs(&self) -> crate::docs::DocStore {
+        crate::docs::DocStore::new(self.pool.clone())
     }
 
-    pub fn accounts(&self) -> crate::accounts::Accounts {
-        crate::accounts::Accounts::new(self.pool.clone())
+    pub fn accounts(&self) -> crate::accounts::AccountStore {
+        crate::accounts::AccountStore::new(self.pool.clone())
     }
 
-    pub fn keys(&self) -> KeyStore {
-        KeyStore::new(self.pool.clone())
+    pub fn keys(&self) -> crate::keys::KeyStore {
+        crate::keys::KeyStore::new(self.pool.clone())
     }
 
     /// Writes a consistent copy of the whole database to `path`, which must

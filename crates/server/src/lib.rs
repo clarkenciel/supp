@@ -6,6 +6,7 @@ pub mod api;
 pub mod auth;
 pub mod connection;
 pub mod docs;
+pub mod keys;
 pub mod store;
 
 use std::{path::PathBuf, sync::Arc};
@@ -25,12 +26,12 @@ use tower_http::services::{ServeDir, ServeFile};
 pub use docs::Docs;
 pub use store::Store;
 
-use crate::{accounts::Accounts, auth::AuthConfig};
+use crate::{accounts::AccountStore, auth::AuthConfig};
 
 #[derive(Clone)]
 pub struct AppState {
     pub docs: Arc<Docs>,
-    pub accounts: Accounts,
+    pub accounts: AccountStore,
     pub auth: Arc<AuthConfig>,
     /// The built web client, if this server serves it.
     pub static_dir: Option<PathBuf>,
